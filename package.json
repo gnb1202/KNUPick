@@ -1,0 +1,38 @@
+{
+  "name": "knupick",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:restart": "taskkill /F /IM node.exe 2>nul & rmdir /s /q .next\\dev 2>nul & npm run dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@sparticuz/chromium": "^143.0.0",
+    "@supabase/supabase-js": "^2.87.1",
+    "@vercel/speed-insights": "^1.3.1",
+    "axios": "^1.13.2",
+    "cheerio": "^1.1.2",
+    "es-hangul": "^2.3.8",
+    "got": "^14.6.5",
+    "next": "^16.0.10",
+    "puppeteer-core": "^24.32.1",
+    "react": "19.2.1",
+    "react-dom": "19.2.1",
+    "undici": "^7.16.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.8",
+    "puppeteer": "^24.32.1",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
