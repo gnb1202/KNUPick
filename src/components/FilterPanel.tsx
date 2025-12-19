@@ -242,20 +242,20 @@ export default function FilterPanel({ selectedDepartment, onDepartmentChange, se
                       }`}
                   >
                     <p className="text-sm font-medium">{dept.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-slate-500 dark:text-slate-300">
                       {dept.campus} · {dept.college}
                     </p>
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="p-4 text-center text-slate-500">검색 결과가 없습니다</p>
+              <p className="p-4 text-center text-slate-500 dark:text-slate-400">검색 결과가 없습니다</p>
             )
           ) : (
             // 전체 목록 (캠퍼스별)
             Object.entries(groupedDepartments).map(([campus, colleges]) => (
               <div key={campus} className="p-2">
-                <p className="px-3 py-1 text-xs font-bold text-slate-400 uppercase">
+                <p className="px-3 py-1 text-xs font-bold text-slate-400 dark:text-slate-300 uppercase">
                   {campus} 캠퍼스
                 </p>
                 {colleges.map((collegeGroup) => (

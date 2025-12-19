@@ -33,7 +33,7 @@ html.dark {
   --foreground: #F1F5F9;
   --color-surface: #1E293B;
   --color-text: #F1F5F9;
-  --color-text-muted: #94A3B8;
+  --color-text-muted: #CBD5E1; /* slate-300 for better contrast */
 }
 
 html.dark body {

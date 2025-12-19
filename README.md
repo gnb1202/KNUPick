@@ -2,6 +2,8 @@
 
 공주대학교 학생을 위한 공모전, 대외활동, 장학금 등 기회 매칭 서비스
 
+🔗 **서비스 바로가기**: [https://knu-pick.vercel.app](https://knu-pick.vercel.app)
+
 ## 📚 Documentation
 
 | 문서 | 한국어 | English |

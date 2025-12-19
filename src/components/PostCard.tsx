@@ -166,28 +166,28 @@ export default function PostCard({ post, index, userId, onBookmarkChange }: Post
 
         {/* 내용 미리보기 - summary 우선, 없으면 content */}
         {(post.summary || post.content) && (
-          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-3">
+          <p className="text-sm text-slate-600 dark:text-slate-300 mb-4 line-clamp-3">
             {post.summary || post.content}
           </p>
         )}
 
         {/* 메타 정보 */}
-        <div className="flex items-stretch gap-3 text-xs text-slate-500 dark:text-slate-400 mt-auto">
+        <div className="flex items-stretch gap-3 text-xs text-slate-500 dark:text-slate-300 mt-auto">
           {/* 왼쪽: 날짜 정보 (항상 두 줄 높이 유지) */}
           <div className="flex flex-col gap-1 flex-1 min-h-[44px]">
             {post.posted_date && (
               <span className="flex items-center gap-1">
-                <span className="text-slate-400 dark:text-slate-500">게시일</span>
+                <span className="text-slate-400 dark:text-slate-400">게시일</span>
                 {new Date(post.posted_date).toLocaleDateString('ko-KR')}
               </span>
             )}
             {post.deadline ? (
               <span className={`flex items-center gap-1 ${isUrgent ? 'text-orange-500 font-medium' : ''}`}>
-                <span className={isUrgent ? '' : 'text-slate-400 dark:text-slate-500'}>마감일</span>
+                <span className={isUrgent ? '' : 'text-slate-400 dark:text-slate-400'}>마감일</span>
                 {new Date(post.deadline).toLocaleDateString('ko-KR')}
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
+              <span className="flex items-center gap-1 text-slate-400 dark:text-slate-400">
                 <span>마감일</span>
                 확인불가
               </span>

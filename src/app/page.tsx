@@ -296,7 +296,7 @@ function HomeContent() {
           <h2 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mb-2">
             나에게 딱 맞는 활동을 찾아보세요
           </h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-6">
+          <p className="text-slate-600 dark:text-slate-300 mb-6">
             학과를 선택하면 관련된 대회와 대외활동을 추천해드려요
           </p>
 
@@ -310,10 +310,10 @@ function HomeContent() {
                   onClick={() => handleActivityTypeToggle(type.id)}
                   className={`
                     px-3 py-1.5 text-sm font-medium rounded-full
-                    transition-all duration-200 btn-press
+                    transition-all duration-200 btn-press border
                     ${isSelected
-                      ? 'bg-[#033885] text-white shadow-md'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      ? 'bg-[#033885] text-white shadow-md border-[#033885]'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-300 dark:border-slate-600'
                     }
                   `}
                 >
@@ -380,7 +380,7 @@ function HomeContent() {
 
             {/* 검색 결과 + 정렬 바 */}
             <div className="flex items-center justify-between mb-4">
-              <p className="text-slate-600 dark:text-slate-400">
+              <p className="text-slate-600 dark:text-slate-300">
                 <span className="font-bold text-[#033885] text-xl">{filteredPostCount}</span>
                 <span className="ml-1">건의 활동</span>
                 {searchQuery && (
@@ -396,7 +396,7 @@ function HomeContent() {
                   onClick={() => handleSortChange('latest')}
                   className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                     sortParam === 'latest'
-                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885]'
+                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885] dark:text-blue-400'
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
@@ -406,7 +406,7 @@ function HomeContent() {
                   onClick={() => handleSortChange('deadline')}
                   className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
                     sortParam === 'deadline'
-                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885]'
+                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885] dark:text-blue-400'
                       : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
                   }`}
                 >
@@ -428,7 +428,7 @@ function HomeContent() {
 
       {/* 푸터 */}
       <footer className="mt-16 py-8 border-t border-slate-200 dark:border-slate-700">
-        <div className="max-w-6xl mx-auto px-4 text-center text-sm text-slate-500">
+        <div className="max-w-6xl mx-auto px-4 text-center text-sm text-slate-500 dark:text-slate-400">
           <p>© 2024 KNUPick. 공주대학교 학생을 위한 서비스입니다.</p>
           <p className="mt-1">
             문의:{' '}
