@@ -1,14 +1,36 @@
 /**
- * Ollama LLM 클라이언트
- * 로컬 LLM을 통한 게시글 분석 기능
+ * LLM 클라이언트 (게시글 분석/요약)
+ *
+ * 공급자는 LLM_PROVIDER로 고른다:
+ *   - openai (기본) : OPENAI_LLM_MODEL. 로컬 GPU 불필요.
+ *   - ollama        : 로컬 OLLAMA_MODEL. GPU 있는 환경용.
+ * LLM_ENABLED=false면 공급자와 무관하게 null을 반환하고,
+ * 호출부(crawl route)가 categorizer.ts 키워드 폴백으로 처리한다.
+ *
+ * 프롬프트는 두 공급자가 공유한다 — 튜닝된 자산이라 분기시키지 않는다.
  */
 
 import { APP_CONFIG } from './constants';
+import { openai } from './openai';
+import { env } from '@/env';
 
-// LLM 설정
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'exaone3.5:7.8b';
-const LLM_ENABLED = process.env.LLM_ENABLED !== 'false';
+// LLM 설정 (env 의존성 검증은 src/env.ts에서 일괄 처리)
+const OLLAMA_HOST = env.OLLAMA_HOST;
+const LLM_ENABLED = env.LLM_ENABLED;
+const LLM_PROVIDER = env.LLM_PROVIDER;
+const OPENAI_LLM_MODEL = env.OPENAI_LLM_MODEL;
+
+export const OLLAMA_MODEL = env.OLLAMA_MODEL ?? '';
+
+// 로그/진단용 — 지금 실제로 어떤 모델이 도는지.
+export const LLM_MODEL_ID = LLM_PROVIDER === 'openai' ? OPENAI_LLM_MODEL : OLLAMA_MODEL;
+
+/**
+ * OpenAI 토큰 사용량 누적 (프로세스 수명 기준).
+ * 배치 스크립트가 실제 비용을 추정치가 아닌 실측으로 보고하기 위한 것.
+ * Ollama 경로에서는 증가하지 않는다.
+ */
+export const llmUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
 
 interface OllamaResponse {
   model: string;
@@ -44,6 +66,7 @@ async function callOllama(prompt: string): Promise<string | null> {
         model: OLLAMA_MODEL,
         prompt,
         stream: false,
+        think: false,  // gemma4 등 thinking 모드 모델에서 reasoning 비활성화 (응답 비어있음 방지)
         options: {
           temperature: 0.3,  // 일관성 있는 응답
           num_predict: 500,  // 최대 토큰 수
@@ -72,6 +95,46 @@ async function callOllama(prompt: string): Promise<string | null> {
 }
 
 /**
+ * OpenAI API 호출
+ *
+ * 이 파일의 프롬프트는 전부 JSON 출력을 요구하고 호출부가 parseJsonResponse로
+ * 받으므로 json_object 모드를 강제한다 (마크다운 펜스/서두 설명이 섞이지 않음).
+ */
+async function callOpenAI(prompt: string): Promise<string | null> {
+  try {
+    const response = await openai.chat.completions.create(
+      {
+        model: OPENAI_LLM_MODEL,
+        temperature: 0.3,
+        max_tokens: 800,
+        response_format: { type: 'json_object' },
+        messages: [{ role: 'user', content: prompt }],
+      },
+      { timeout: APP_CONFIG.LLM.TIMEOUT }
+    );
+
+    if (response.usage) {
+      llmUsage.calls++;
+      llmUsage.promptTokens += response.usage.prompt_tokens;
+      llmUsage.completionTokens += response.usage.completion_tokens;
+    }
+
+    return response.choices[0]?.message?.content ?? null;
+  } catch (error) {
+    console.error('OpenAI LLM error:', error);
+    return null;
+  }
+}
+
+/**
+ * 공급자 분기. 모든 분석 함수는 이 함수를 거친다.
+ */
+async function callLLM(prompt: string): Promise<string | null> {
+  if (!LLM_ENABLED) return null;
+  return LLM_PROVIDER === 'openai' ? callOpenAI(prompt) : callOllama(prompt);
+}
+
+/**
  * JSON 응답 파싱 (LLM 응답에서 JSON 추출)
  * - 마크다운 코드 블록 처리
  * - Greedy 매칭 방지
@@ -79,7 +142,7 @@ async function callOllama(prompt: string): Promise<string | null> {
 function parseJsonResponse<T>(response: string): T | null {
   try {
     // 1. 마크다운 코드 블록 제거 (```json ... ``` 또는 ``` ... ```)
-    let cleaned = response.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1');
+    const cleaned = response.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1');
 
     // 2. 첫 유효한 JSON 객체만 추출 (greedy 방지 - 중첩 1단계까지 지원)
     const jsonMatch = cleaned.match(/\{(?:[^{}]|\{[^{}]*\})*\}/);
@@ -151,7 +214,7 @@ Output: {"summary": "2025학년도 1학기 국가장학금 신청 안내입니�
 
 Respond with JSON only:`;
 
-  const response = await callOllama(prompt);
+  const response = await callLLM(prompt);
   if (!response) return null;
 
   const parsed = parseJsonResponse<{ summary: string }>(response);
@@ -202,7 +265,7 @@ Bad: {"activity_types": ["1", "6"]}  // strings not allowed
 
 Respond with JSON only:`;
 
-  const response = await callOllama(prompt);
+  const response = await callLLM(prompt);
   if (!response) return null;
 
   const parsed = parseJsonResponse<{ activity_types: unknown }>(response);
@@ -251,7 +314,7 @@ Output: {"deadline": null}
 
 Respond with JSON only:`;
 
-  const response = await callOllama(prompt);
+  const response = await callLLM(prompt);
   if (!response) return null;
 
   const parsed = parseJsonResponse<{ deadline: unknown }>(response);
@@ -303,7 +366,7 @@ Output: {"keywords": ["간호", "의료", "취업", "건강"]}
 
 Respond with JSON only:`;
 
-  const response = await callOllama(prompt);
+  const response = await callLLM(prompt);
   if (!response) return null;
 
   const parsed = parseJsonResponse<{ keywords: string[] }>(response);
@@ -347,6 +410,7 @@ Content: ${truncatedContent}
 </ACTIVITY_TYPES>
 
 <CLASSIFICATION_RULES>
+MUST classify as ID 3 (서포터즈/기자단): 서포터즈, 기자단, 학생기자단, 학보, 학보사, 신문사, 방송국, 홍보대사, 앰배서더, 크루
 MUST classify as ID 6 (교육/특강): 채용설명회, 취업박람회, 세미나, 워크숍
 MUST classify as ID 7 (장학금/지원): 학습지원단, 학습튜터, 멘토링, 캠퍼스순찰대 (these are 근로장학 paid positions)
 MUST classify as ID 8 (기타): 기숙사, 학생생활관, 입실신청, 행정 공지
@@ -370,7 +434,7 @@ MUST classify as ID 8 (기타): 기숙사, 학생생활관, 입실신청, 행정
 <EVENT_DATE_RULES>
 - event_start_date = actual event/education/activity start date
 - event_end_date = actual event/education/activity end date
-- Keywords: 운영일시, 교육기간, 활동기간, 행사일, 봉사일시, 일시/장소, 진행기간
+- Keywords: 운영일시, 교육기간, 활동기간, 행사일, 봉사일시, 일시/장소, 진행기간, 근무기간, 인턴십기간, 실습기간
 - "운영일시: 2025. 12. 29.(월) ~ 2026. 1. 10.(토)" → event_start_date: 12/29, event_end_date: 1/10
 - "봉사일시: 12. 22.(월) 09:30" → event_start_date: 12/22, event_end_date: null
 - "교육기간: 2026. 1. 5. ~ 4. 30." → event_start_date: 1/5, event_end_date: 4/30
@@ -413,6 +477,11 @@ Input Title: "2025학년도 2학기 강의평가 기간 안내"
 Input Content: "강의평가 기간: 2025. 12. 19.(금) ~ 12. 31.(수), 17:00"
 Output: {"summary": "12월 31일 17시까지 강의평가 완료.", "activity_types": [8], "deadline": "2025-12-31", "event_start_date": null, "event_end_date": null, "keywords": ["강의평가", "성적"]}
 
+Example 6a (Student reporters/supporters - ID 3, NOT 8):
+Input Title: "대학신문 학생기자단 9기 모집"
+Input Content: "교내 행사 취재 및 기사 작성. 모집인원 8명. 활동기간 1년. 신청마감: 2025.5.15. 활동비 지급."
+Output: {"summary": "교내 취재 활동 1년. 5월 15일까지 모집.", "activity_types": [3], "deadline": "2025-05-15", "event_start_date": null, "event_end_date": null, "keywords": ["기자단", "학보", "취재"]}
+
 Example 6 (No date in content - deadline null):
 Input Title: "2026학년도 학생생활관 입실신청 안내"
 Input Content: "붙임과 같이 입실신청을 받고자 하오니 기간 내 신청하시기 바랍니다. 2025. 12. 12. 학생생활관"
@@ -427,7 +496,7 @@ Output: {"deadline": "2025-12-23"}  // "기간 내 신청" only, no specific dat
 
 Respond with JSON only:`;
 
-  const response = await callOllama(prompt);
+  const response = await callLLM(prompt);
   if (!response) return null;
 
   console.log('LLM raw response:', response.slice(0, 500));
@@ -450,6 +519,15 @@ Respond with JSON only:`;
  * LLM 연결 테스트
  */
 export async function testLLMConnection(): Promise<boolean> {
+  if (LLM_PROVIDER === 'openai') {
+    // 키 존재만 확인한다. 실제 유효성까지 보려면 매 크롤마다 왕복이 하나 늘고,
+    // 키가 틀렸더라도 각 분석이 null을 반환해 키워드 폴백으로 안전하게 떨어진다.
+    const available = !!env.OPENAI_API_KEY;
+    console.log(`LLM 연결 상태: ${available ? '성공' : 'OPENAI_API_KEY 없음'}`);
+    console.log(`사용 모델: ${OPENAI_LLM_MODEL} (openai)`);
+    return available;
+  }
+
   try {
     const response = await fetch(`${OLLAMA_HOST}/api/tags`);
     if (!response.ok) return false;
@@ -474,4 +552,119 @@ export async function testLLMConnection(): Promise<boolean> {
  */
 export function isLLMEnabled(): boolean {
   return LLM_ENABLED;
+}
+
+// ============================================
+// 이미지 공지 분석 (CLOVA OCR → LLM 텍스트 분석)
+//
+// CLOVA OCR은 네이버 클라우드 API라 로컬 GPU와 무관하게 항상 쓸 수 있다.
+// 2단계 분석만 LLM_PROVIDER를 따르므로, LLM_PROVIDER=openai면 GPU 없이도
+// 이미지 공지 파이프라인 전체가 동작한다.
+// ============================================
+
+const CLOVA_OCR_URL = env.CLOVA_OCR_URL || '';
+const CLOVA_OCR_SECRET = env.CLOVA_OCR_SECRET || '';
+
+/**
+ * CLOVA OCR로 이미지에서 텍스트 추출
+ */
+async function extractTextWithClovaOCR(imageUrl: string): Promise<string | null> {
+  if (!CLOVA_OCR_URL || !CLOVA_OCR_SECRET) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), APP_CONFIG.LLM.VISION_TIMEOUT);
+
+    const response = await fetch(CLOVA_OCR_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-OCR-SECRET': CLOVA_OCR_SECRET,
+      },
+      body: JSON.stringify({
+        version: 'V2',
+        requestId: `knupick-${Date.now()}`,
+        timestamp: Date.now(),
+        images: [
+          {
+            format: 'jpg',
+            name: 'notice-image',
+            url: imageUrl,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.error('CLOVA OCR API error:', response.status);
+      return null;
+    }
+
+    const data = await response.json();
+
+    // OCR 결과에서 텍스트 추출
+    const fields = data.images?.[0]?.fields;
+    if (!fields || fields.length === 0) {
+      console.log('CLOVA OCR: 텍스트 없음');
+      return null;
+    }
+
+    const extractedText = fields
+      .map((field: { inferText: string }) => field.inferText)
+      .join(' ');
+
+    console.log(`CLOVA OCR 추출 (${fields.length}개 필드, ${extractedText.length}자): ${extractedText.slice(0, 100)}...`);
+    return extractedText;
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.error('CLOVA OCR timeout');
+    } else {
+      console.error('CLOVA OCR error:', error);
+    }
+    return null;
+  }
+}
+
+/**
+ * 여러 이미지에서 OCR 텍스트 추출 후 합치기
+ */
+export async function extractTextsFromImages(imageUrls: string[]): Promise<string | null> {
+  const limitedUrls = imageUrls.slice(0, APP_CONFIG.LLM.VISION_MAX_IMAGES);
+  const texts: string[] = [];
+
+  for (const url of limitedUrls) {
+    const text = await extractTextWithClovaOCR(url);
+    if (text) texts.push(text);
+  }
+
+  if (texts.length === 0) return null;
+  return texts.join('\n');
+}
+
+/**
+ * 이미지 공지 분석 (CLOVA OCR → EXAONE 텍스트 분석)
+ */
+export async function analyzeImagePostWithLLM(title: string, imageUrls: string[]): Promise<LLMAnalysisResult | null> {
+  // 1단계: CLOVA OCR로 텍스트 추출
+  const ocrText = await extractTextsFromImages(imageUrls);
+  if (!ocrText) {
+    console.log('OCR 텍스트 추출 실패, 이미지 분석 스킵');
+    return null;
+  }
+
+  // 2단계: 추출된 텍스트를 일반 텍스트 분석 경로로 넘긴다 (공급자는 LLM_PROVIDER)
+  console.log(`OCR 텍스트로 ${LLM_MODEL_ID} 분석 시작: ${ocrText.slice(0, 80)}...`);
+  return analyzePostWithLLM(title, ocrText);
+}
+
+/**
+ * CLOVA OCR 연결 테스트
+ */
+export async function testVisionModelConnection(): Promise<boolean> {
+  const available = !!(CLOVA_OCR_URL && CLOVA_OCR_SECRET);
+  console.log(`CLOVA OCR 상태: ${available ? '사용 가능' : '미설정'}`);
+  return available;
 }

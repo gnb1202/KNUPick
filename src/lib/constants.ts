@@ -12,7 +12,8 @@ export const APP_CONFIG = {
   CRAWLER: {
     PAGE_TIMEOUT: 30000,        // 페이지 로드 타임아웃 (ms)
     RATE_LIMIT_DELAY: 1000,     // 페이지 간 딜레이 (ms)
-    MAX_PAGES: 5,               // 최대 크롤링 페이지 수
+    MAX_PAGES: 10,              // 최대 크롤링 페이지 수 (정기 실행 기준)
+    MAX_PAGES_LIMIT: 50,        // ?pages=N 으로 올릴 수 있는 상한 (과거 공백 메우기용)
     DETAIL_DELAY: 500,          // 상세 페이지 크롤링 딜레이 (ms)
   },
 
@@ -25,6 +26,12 @@ export const APP_CONFIG = {
     MAX_CONTENT_LENGTH: 2000, // 본문 최대 길이 (토큰 절약)
     SUMMARY_MAX_LENGTH: 200,  // 요약 최대 글자 수
     RETRY_COUNT: 2,           // 재시도 횟수
+    // 비전 모델 설정
+    VISION_MAX_IMAGES: 3,           // 최대 처리 이미지 수
+    VISION_IMAGE_MAX_SIZE: 4 * 1024 * 1024,  // 4MB
+    VISION_IMAGE_TIMEOUT: 15000,    // 이미지 다운로드 타임아웃 (ms)
+    VISION_TIMEOUT: 60000,          // 비전 모델 응답 타임아웃 (ms)
+    VISION_MAX_WIDTH: 1024,         // 이미지 리사이즈 최대 너비
   },
 } as const;
 
@@ -41,6 +48,26 @@ export const ACTIVITY_TYPES: ActivityType[] = [
   { id: 7, name: '장학금/지원', icon: '💰', keywords: ['장학금', '장학', '지원금', '후원'] },
   { id: 8, name: '기타', icon: '📌', keywords: [] },
 ];
+
+// 활동유형 ID → 컬러 매핑 (Toss-style 디자인 시스템)
+export const ACTIVITY_COLORS: Record<number, string> = {
+  1: '#F59E0B', // 공모전
+  2: '#10B981', // 대외활동
+  3: '#EC4899', // 서포터즈/기자단
+  4: '#3B82F6', // 인턴십/채용
+  5: '#8B5CF6', // 봉사활동
+  6: '#06B6D4', // 교육/특강
+  7: '#EF4444', // 장학금/지원
+  8: '#64748B', // 기타
+};
+
+// 캠퍼스 라벨
+export const CAMPUS_LABELS: Record<string, string> = {
+  common: '공통',
+  kongju: '공주',
+  cheonan: '천안',
+  yesan: '예산',
+};
 
 // 학과별 키워드 매핑 (학과명 기반 자동 생성)
 export const DEPARTMENT_KEYWORDS: Record<string, string[]> = {
