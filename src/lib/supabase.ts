@@ -1,27 +1,33 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { env } from '@/env';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-
-// 환경변수가 없는 경우 null 반환
-function createSupabaseClient(): SupabaseClient | null {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.warn('Supabase credentials not found. Using mock data.');
-    return null;
-  }
-  return createClient(supabaseUrl, supabaseAnonKey);
+declare global {
+  var __knupickSupabase: SupabaseClient | undefined;
 }
 
-function createSupabaseAdminClient(): SupabaseClient | null {
-  if (!supabaseUrl) {
-    return null;
+function getSupabaseClient(): SupabaseClient {
+  if (typeof window === 'undefined') {
+    return createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
   }
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || supabaseAnonKey;
-  if (!serviceKey) {
-    return null;
+
+  if (!globalThis.__knupickSupabase) {
+    globalThis.__knupickSupabase = createClient(
+      env.NEXT_PUBLIC_SUPABASE_URL,
+      env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    );
   }
-  return createClient(supabaseUrl, serviceKey);
+  return globalThis.__knupickSupabase;
 }
 
-export const supabase = createSupabaseClient();
-export const supabaseAdmin = createSupabaseAdminClient();
+function getSupabaseAdminClient(): SupabaseClient | null {
+  // service role key는 서버 전용 — 클라이언트 번들에선 비활성
+  if (typeof window !== 'undefined') return null;
+  return createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+export const supabase = getSupabaseClient();
+export const supabaseAdmin = getSupabaseAdminClient();
