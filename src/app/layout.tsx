@@ -1,24 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import Chatbot from "@/components/Chatbot";
 import "./globals.css";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
-  subsets: ["latin"],
-});
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#033885" },
-    { media: "(prefers-color-scheme: dark)", color: "#0F172A" },
+    { media: "(prefers-color-scheme: light)", color: "#3182F6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0F1115" },
   ],
   width: "device-width",
   initialScale: 1,
@@ -63,12 +53,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" suppressHydrationWarning>
-      <body
-        className={`${inter.variable} ${spaceGrotesk.variable} antialiased gradient-bg min-h-screen`}
-      >
+      <body className="antialiased min-h-screen">
         <ThemeProvider>
           <AuthProvider>
             {children}
+            <Chatbot />
           </AuthProvider>
         </ThemeProvider>
         <SpeedInsights />

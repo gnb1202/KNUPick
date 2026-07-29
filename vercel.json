@@ -3,7 +3,7 @@
     "src/app/api/crawl/route.ts": {
       "maxDuration": 60
     },
-    "src/app/api/llm/route.ts": {
+    "src/app/api/llm/test/route.ts": {
       "maxDuration": 30
     }
   }

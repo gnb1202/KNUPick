@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { crawlAllPosts, crawlPostDetail, closeBrowser } from '@/lib/crawler';
+import { crawlAllPosts, crawlPostDetail, closeBrowser, normalizeOriginalUrl } from '@/lib/crawler';
 import { categorizeActivityTypes, extractKeywords, parseDeadline } from '@/lib/categorizer';
-import { analyzePostWithLLM, isLLMEnabled, testLLMConnection } from '@/lib/llm';
+import { analyzePostWithLLM, analyzeImagePostWithLLM, isLLMEnabled, testLLMConnection, testVisionModelConnection } from '@/lib/llm';
+import { buildEmbeddingText, generateEmbedding, EMBEDDING_MODEL_ID } from '@/lib/embeddings';
 import { APP_CONFIG } from '@/lib/constants';
+import { env } from '@/env';
 
 // 관리자 권한 확인 함수
 async function checkAdminAuth(request: NextRequest): Promise<boolean> {
@@ -23,7 +25,7 @@ async function checkAdminAuth(request: NextRequest): Promise<boolean> {
 export async function GET(request: NextRequest) {
   // CRON_SECRET 또는 관리자 인증 확인
   const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = env.CRON_SECRET;
   const isCronAuth = cronSecret && authHeader === `Bearer ${cronSecret}`;
   const isAdminAuth = await checkAdminAuth(request);
 
@@ -46,22 +48,45 @@ export async function GET(request: NextRequest) {
 
     // LLM 연결 상태 확인
     const llmAvailable = isLLMEnabled() && await testLLMConnection();
+    const visionAvailable = llmAvailable && await testVisionModelConnection();
     console.log(`LLM 사용: ${llmAvailable ? '활성화' : '비활성화 (키워드 방식 사용)'}`);
+    console.log(`비전 모델: ${visionAvailable ? '활성화' : '비활성화 (이미지 공지 스킵)'}`);
 
     // 기존 게시글 URL 목록 가져오기 (중복 방지)
+    // DB에는 historically ?layout=unknown suffix 있는 행과 없는 행이 섞여 있음.
+    // crawlPostDetail이 항상 ?layout=unknown을 추가하므로 정규화로 비교 키 공간 통일.
     const { data: existingPosts } = await supabaseAdmin
       .from('posts')
       .select('original_url');
 
-    const existingUrls = new Set(existingPosts?.map((p) => p.original_url) || []);
+    const existingUrls = new Set(
+      (existingPosts ?? [])
+        .map((p) => normalizeOriginalUrl(p.original_url))
+        .filter(Boolean)
+    );
 
     // 크롤링 실행 (10페이지)
-    const crawledPosts = await crawlAllPosts(10);
+    // ?pages=N 으로 조정 가능. 기본값은 정기 실행 기준(MAX_PAGES)이고,
+    // 오래 안 돌려서 과거 구간이 비었을 때만 크게 올려 메운다.
+    // 목록 페이지만 더 읽는 비용이라 이미 있는 글은 dedupe에서 걸러진다.
+    const pagesParam = parseInt(request.nextUrl.searchParams.get('pages') || '', 10);
+    const maxPages =
+      Number.isInteger(pagesParam) && pagesParam > 0 && pagesParam <= APP_CONFIG.CRAWLER.MAX_PAGES_LIMIT
+        ? pagesParam
+        : APP_CONFIG.CRAWLER.MAX_PAGES;
 
-    // 새 게시글만 필터링
-    const newPosts = crawledPosts.filter((post) => !existingUrls.has(post.original_url));
+    console.log(`크롤링 페이지 수: ${maxPages}`);
+    const crawledPosts = await crawlAllPosts(maxPages);
 
-    console.log(`Found ${crawledPosts.length} posts, ${newPosts.length} are new`);
+    // 새 게시글만 필터링 (정규화된 URL로 비교)
+    const newPosts = crawledPosts.filter(
+      (post) => !existingUrls.has(normalizeOriginalUrl(post.original_url))
+    );
+
+    const skippedExisting = crawledPosts.length - newPosts.length;
+    console.log(
+      `Found ${crawledPosts.length} posts, ${newPosts.length} new, ${skippedExisting} already in DB`
+    );
 
     // 상세 페이지 크롤링 및 DB 저장
     const results = [];
@@ -73,6 +98,16 @@ export async function GET(request: NextRequest) {
         const detail = await crawlPostDetail(post.original_url);
         const fullContent = detail?.content || post.content;
 
+        // 단축 URL 결정 (DB 저장용 + 2차 dedupe용)
+        const finalUrl = detail?.shortUrl || post.original_url;
+
+        // 2차 dedupe: detail 후 ?layout=unknown 붙은 URL을 정규화하여 한 번 더 체크.
+        // 1차에서 막혔어야 정상이지만, 미래에 URL 변형 로직이 바뀌어도 LLM 분석 전에 걸러주는 안전망.
+        if (existingUrls.has(normalizeOriginalUrl(finalUrl))) {
+          console.log(`2차 dedupe로 스킵: ${post.title.slice(0, 30)}...`);
+          continue;
+        }
+
         // 기본값: 기존 키워드 방식
         let activity_types = categorizeActivityTypes(post.title, fullContent);
         let keywords = extractKeywords(post.title, fullContent);
@@ -83,14 +118,23 @@ export async function GET(request: NextRequest) {
 
         // 이미지 공지 체크 (content가 비어있는 경우)
         const isImageOnly = !fullContent || fullContent.trim().length === 0;
+        const imageUrls = detail?.imageUrls || [];
 
-        // LLM 분석 시도 (이미지 공지가 아닌 경우만)
-        if (llmAvailable && !isImageOnly) {
+        // LLM 분석 시도
+        if (llmAvailable) {
           try {
-            const llmResult = await analyzePostWithLLM(post.title, fullContent);
+            let llmResult = null;
+
+            if (isImageOnly && visionAvailable && imageUrls.length > 0) {
+              // 이미지 공지 → CLOVA OCR + EXAONE 분석
+              console.log(`이미지 공지 OCR 분석 시도 (${imageUrls.length}장): ${post.title.slice(0, 30)}...`);
+              llmResult = await analyzeImagePostWithLLM(post.title, imageUrls);
+            } else if (!isImageOnly) {
+              // 텍스트 공지 → 기존 텍스트 분석
+              llmResult = await analyzePostWithLLM(post.title, fullContent);
+            }
 
             if (llmResult) {
-              // LLM 결과가 있으면 사용 (없는 항목은 기존 방식 유지)
               if (llmResult.summary) summary = llmResult.summary;
               if (llmResult.activity_types.length > 0) activity_types = llmResult.activity_types;
               if (llmResult.keywords.length > 0) keywords = llmResult.keywords;
@@ -99,20 +143,17 @@ export async function GET(request: NextRequest) {
               if (llmResult.event_end_date) event_end_date = llmResult.event_end_date;
 
               llmSuccessCount++;
-              console.log(`LLM 분석 성공: ${post.title.slice(0, 30)}...`);
+              console.log(`${isImageOnly ? '비전' : 'LLM'} 분석 성공: ${post.title.slice(0, 30)}...`);
             }
           } catch (llmError) {
             console.error('LLM 분석 실패, 키워드 방식 사용:', llmError);
           }
         }
 
-        // 이미지 공지인 경우 안내 문구 설정
-        if (isImageOnly) {
+        // 이미지 공지인데 분석 실패한 경우 안내 문구 설정
+        if (isImageOnly && !summary) {
           summary = '이미지로 작성된 공지입니다. 원문에서 상세 내용을 확인하세요.';
         }
-
-        // 단축 URL이 있으면 사용, 없으면 기존 URL 사용
-        const finalUrl = detail?.shortUrl || post.original_url;
 
         const { data, error } = await supabaseAdmin.from('posts').insert({
           title: post.title,
@@ -129,9 +170,47 @@ export async function GET(request: NextRequest) {
         }).select();
 
         if (error) {
-          console.error('Insert error:', error);
+          // 23505 = unique_violation. dedupe가 누락한 케이스의 마지막 안전망이며,
+          // 정상적으로는 dedupe에서 막혀야 하므로 노이즈로 다루지 않고 INFO로 격하.
+          // 다른 에러 코드는 그대로 ERROR로 보고.
+          if ((error as { code?: string }).code === '23505') {
+            console.log(
+              `Insert skipped (dedupe missed, unique conflict): ${post.title.slice(0, 30)}...`
+            );
+          } else {
+            console.error('Insert error:', error);
+          }
         } else {
           results.push(data);
+
+          // 임베딩 생성 (OpenAI 사용 가능 시)
+          if (data && data[0]) {
+            try {
+              const embedding = await generateEmbedding(
+                buildEmbeddingText({
+                  title: post.title,
+                  summary,
+                  content: fullContent,
+                  keywords,
+                  activity_types,
+                  campus: post.campus,
+                  deadline,
+                  event_start_date,
+                })
+              );
+              if (embedding) {
+                await supabaseAdmin
+                  .from('posts')
+                  .update({
+                    embedding: JSON.stringify(embedding),
+                    embedding_model: EMBEDDING_MODEL_ID,
+                  })
+                  .eq('id', data[0].id);
+              }
+            } catch (embErr) {
+              console.error('임베딩 생성 실패:', embErr);
+            }
+          }
 
           // 학과 매핑 생성 (post_department_relevance)
           if (data && data[0]) {
@@ -198,6 +277,7 @@ export async function GET(request: NextRequest) {
       inserted: results.length,
       llmAnalyzed: llmSuccessCount,
       llmEnabled: llmAvailable,
+      visionEnabled: visionAvailable,
       durationMs,
     });
   } catch (error) {

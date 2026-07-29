@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { testLLMConnection, isLLMEnabled, analyzePostWithLLM } from '@/lib/llm';
+import { testLLMConnection, isLLMEnabled, analyzePostWithLLM, LLM_MODEL_ID } from '@/lib/llm';
+import { env } from '@/env';
 
 /**
  * LLM 연결 테스트 및 샘플 분석 API
@@ -7,20 +8,22 @@ import { testLLMConnection, isLLMEnabled, analyzePostWithLLM } from '@/lib/llm';
 export async function GET(request: NextRequest) {
   // 인증 검증
   const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const enabled = isLLMEnabled();
   const connected = await testLLMConnection();
 
+  // host는 Ollama일 때만 의미가 있다 (OpenAI는 SDK가 엔드포인트를 관리).
   return NextResponse.json({
     enabled,
     connected,
-    model: process.env.OLLAMA_MODEL || 'exaone3.5:7.8b',
-    host: process.env.OLLAMA_HOST || 'http://localhost:11434',
+    provider: env.LLM_PROVIDER,
+    model: LLM_MODEL_ID,
+    host: env.LLM_PROVIDER === 'ollama' ? env.OLLAMA_HOST : undefined,
   });
 }
 
@@ -30,9 +33,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   // 인증 검증
   const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
+  const cronSecret = env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

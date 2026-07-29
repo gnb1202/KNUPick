@@ -15,7 +15,7 @@ const CAMPUS_OPTIONS: { value: Campus; label: string }[] = [
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user, profile, isLoading, updateProfile, signOut } = useAuth();
+  const { user, profile, isLoading, updateProfile, signOut, deleteAccount } = useAuth();
 
   const [nickname, setNickname] = useState('');
   const [campus, setCampus] = useState<Campus | null>(null);
@@ -27,6 +27,7 @@ export default function ProfilePage() {
   const [newExcludedKeyword, setNewExcludedKeyword] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [profileKey, setProfileKey] = useState<string | null>(null);
 
@@ -41,12 +42,12 @@ export default function ProfilePage() {
     setProfileKey(profile.id);
   }
 
-  // 비로그인 상태 리다이렉트 (로그아웃 중이 아닐 때만)
+  // 비로그인 상태 리다이렉트 (로그아웃/탈퇴 중이 아닐 때만)
   useEffect(() => {
-    if (!isLoading && !user && !isLoggingOut) {
+    if (!isLoading && !user && !isLoggingOut && !isDeleting) {
       router.push('/login');
     }
-  }, [isLoading, user, router, isLoggingOut]);
+  }, [isLoading, user, router, isLoggingOut, isDeleting]);
 
   const handleActivityTypeToggle = (id: number) => {
     setPreferredTypes((prev) =>
@@ -94,11 +95,16 @@ export default function ProfilePage() {
 
     if (error) {
       setMessage({ type: 'error', text: '저장에 실패했습니다. 다시 시도해주세요.' });
-    } else {
-      setMessage({ type: 'success', text: '프로필이 저장되었습니다!' });
+      setIsSaving(false);
+      return;
     }
 
+    setMessage({ type: 'success', text: '프로필이 저장되었습니다! 홈으로 이동합니다…' });
     setIsSaving(false);
+
+    setTimeout(() => {
+      router.push('/');
+    }, 600);
   };
 
   const handleLogout = async () => {
@@ -110,6 +116,23 @@ export default function ProfilePage() {
       console.error('Logout error:', err);
       setIsLoggingOut(false);
     }
+  };
+
+  const handleDeleteAccount = async () => {
+    const ok = window.confirm(
+      '정말로 회원탈퇴하시겠습니까?\n\n프로필, 북마크 등 모든 정보가 영구 삭제되며 복구할 수 없습니다.'
+    );
+    if (!ok) return;
+
+    setIsDeleting(true);
+    setMessage(null);
+    const { error } = await deleteAccount();
+    if (error) {
+      setMessage({ type: 'error', text: error.message });
+      setIsDeleting(false);
+      return;
+    }
+    router.push('/');
   };
 
   if (isLoading) {
@@ -430,6 +453,27 @@ export default function ProfilePage() {
             {isSaving ? '저장 중...' : '프로필 저장'}
           </button>
         </form>
+
+        {/* 회원탈퇴 영역 */}
+        <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-700">
+          <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2">
+            계정 관리
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+            탈퇴 시 프로필, 북마크 등 모든 정보가 영구 삭제됩니다.
+          </p>
+          <button
+            type="button"
+            onClick={handleDeleteAccount}
+            disabled={isDeleting}
+            className="px-4 py-2 text-sm text-red-600 dark:text-red-400
+                     border border-red-200 dark:border-red-900/50 rounded-lg
+                     hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors
+                     disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isDeleting ? '탈퇴 처리 중...' : '회원탈퇴'}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ interface AuthContextType {
   signUp: (username: string, password: string) => Promise<{ error: Error | null }>;
   signIn: (username: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<{ error: Error | null }>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<{ error: Error | null }>;
   refreshProfile: () => Promise<void>;
 }
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  // 프로필 가져오기 (재시도 로직 포함)
+  // 프로필 가져오기 (가입 직후 트리거가 행을 만들 때까지 짧게 재시도)
   const fetchProfile = async (userId: string, retries = 3): Promise<UserProfile | null> => {
     if (!supabase) return null;
 
@@ -38,23 +39,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      // PGRST116: 결과가 없음 - 프로필이 아직 생성 중일 수 있음
-      if (error.code === 'PGRST116' && retries > 0) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        return fetchProfile(userId, retries - 1);
-      }
-      // 재시도 후에도 없으면 조용히 처리 (새 회원가입의 경우 정상)
-      if (error.code === 'PGRST116') {
-        return null;
-      }
       console.error('Profile fetch error:', error);
       return null;
     }
 
-    return data as UserProfile;
+    if (!data && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return fetchProfile(userId, retries - 1);
+    }
+
+    return (data as UserProfile) ?? null;
   };
 
   // 프로필 새로고침
@@ -100,21 +97,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 인증 상태 변경 리스너
     if (!supabase) return;
 
+    // ⚠️ Supabase 데드락 회피:
+    // onAuthStateChange 콜백 안에서 await로 다른 supabase 호출을 하면
+    // GoTrueClient 내부 락과 충돌해 signInWithPassword 등의 Promise가 풀리지 않는다.
+    // 콜백은 동기 처리만 하고, fetchProfile은 마이크로태스크 큐 밖으로 분리한다.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         if (!mounted) return;
 
         setSession(session);
         setUser(session?.user ?? null);
+        setIsLoading(false);
 
         if (session?.user) {
-          const profileData = await fetchProfile(session.user.id);
-          if (mounted) setProfile(profileData);
+          const userId = session.user.id;
+          setTimeout(() => {
+            fetchProfile(userId).then((profileData) => {
+              if (mounted) setProfile(profileData);
+            });
+          }, 0);
         } else {
           setProfile(null);
         }
-
-        setIsLoading(false);
       }
     );
 
@@ -136,7 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select('id')
       .eq('username', username)
-      .single();
+      .maybeSingle();
 
     if (existingUser) {
       return { error: new Error('이미 사용 중인 아이디입니다.') };
@@ -144,11 +148,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const email = usernameToEmail(username);
 
+    // username을 metadata로 넘기면 on_auth_user_created 트리거가 profiles 행을 생성한다.
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        // 이메일 인증 건너뛰기
+        data: { username },
         emailRedirectTo: undefined,
       },
     });
@@ -157,23 +162,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error };
     }
 
-    // 프로필 생성
     if (data.user) {
-      const { error: profileError } = await supabase.from('profiles').insert({
-        id: data.user.id,
-        username,
-        nickname: null,
-        campus: null,
-        department_id: null,
-        preferred_activity_types: [],
-      });
+      // 트리거(on_auth_user_created)가 행을 만들지만, 마이그레이션 적용 전 환경에서도
+      // 동작하도록 idempotent upsert로 보장. 트리거가 먼저 만들었으면 충돌 없이 무시.
+      await supabase
+        .from('profiles')
+        .upsert({ id: data.user.id, username }, { onConflict: 'id', ignoreDuplicates: true });
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        return { error: new Error('프로필 생성에 실패했습니다.') };
-      }
-
-      // 프로필 생성 후 즉시 상태 업데이트
       const profileData = await fetchProfile(data.user.id);
       if (profileData) {
         setProfile(profileData);
@@ -217,6 +212,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
   };
 
+  // 회원탈퇴 — 서버 라우트가 service-role로 auth.users + profiles 삭제 후 클라 세션 정리
+  const deleteAccount = async () => {
+    if (!supabase) {
+      return { error: new Error('Supabase not configured') };
+    }
+
+    const { data: { session: current } } = await supabase.auth.getSession();
+    const token = current?.access_token;
+    if (!token) {
+      return { error: new Error('Not authenticated') };
+    }
+
+    const res = await fetch('/api/auth/delete', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      return { error: new Error(body.error || '회원탈퇴에 실패했습니다.') };
+    }
+
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setSession(null);
+    return { error: null };
+  };
+
   // 프로필 업데이트
   const updateProfile = async (updates: Partial<UserProfile>) => {
     if (!supabase || !user) {
@@ -249,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signUp,
         signIn,
         signOut,
+        deleteAccount,
         updateProfile,
         refreshProfile,
       }}

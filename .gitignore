@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# 예시 파일은 시크릿이 없고 설정 문서 역할을 하므로 추적한다
+!.env.local.example
 
 # vercel
 .vercel
@@ -52,3 +54,20 @@ nul
 
 # playwright
 .playwright-mcp/
+
+# supabase CLI 로컬 메타데이터(.branches, .temp 등)는 무시하되
+# schema.sql 같은 코드는 git에 포함시킨다.
+/supabase/.branches
+/supabase/.temp
+/supabase/config.toml
+/knupick-design
+
+# DB 스냅샷 (scripts/dump-posts.ts)
+backups/
+
+# oh-my-claudecode 에이전트 세션 상태
+.omc/
+
+# 개발 중 저장한 화면 캡처 (저장소 루트 한정 — public/ 이미지는 유지)
+/*.png
+/*.jpg

@@ -13,7 +13,8 @@ function isChosung(char: string): boolean {
 /**
  * 검색어가 초성으로만 구성되어 있는지 확인
  */
-function isChosungOnly(str: string): boolean {
+export function isChosungOnly(str: string): boolean {
+  if (!str.trim()) return false;
   return str.split('').every((char) => isChosung(char) || char === ' ');
 }
 

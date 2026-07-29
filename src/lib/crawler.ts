@@ -187,7 +187,9 @@ export async function crawlPostList(page: number = 1): Promise<{ posts: CrawledP
 
     // 다음 페이지 존재 여부 확인
     const totalPosts = parseInt($('.util-search strong').text().trim()) || 0;
-    const hasMore = page * 10 < totalPosts && posts.length > 0;
+    // 페이지당 실제 항목 수로 계산한다. 10으로 하드코딩돼 있었는데
+    // 목록은 12건씩 내려와서 진행 추정이 어긋나 있었다.
+    const hasMore = posts.length > 0 && page * posts.length < totalPosts;
 
     console.log(`Page ${page}: Found ${posts.length} posts, hasMore: ${hasMore}`);
     return { posts, hasMore };
@@ -200,7 +202,7 @@ export async function crawlPostList(page: number = 1): Promise<{ posts: CrawledP
 /**
  * 게시글 상세 페이지 크롤링
  */
-export async function crawlPostDetail(url: string): Promise<{ content: string; deadline: string | null; shortUrl: string | null } | null> {
+export async function crawlPostDetail(url: string): Promise<{ content: string; deadline: string | null; shortUrl: string | null; imageUrls: string[] } | null> {
   try {
     console.log(`Crawling detail: ${url}`);
     const html = await fetchHtml(url);
@@ -212,6 +214,16 @@ export async function crawlPostDetail(url: string): Promise<{ content: string; d
       .trim()
       .replace(/\s+/g, ' ');
 
+    // 본문 이미지 URL 추출
+    const imageUrls: string[] = [];
+    $('.view-con img').each((_, el) => {
+      const src = $(el).attr('src');
+      if (src) {
+        const absoluteUrl = src.startsWith('http') ? src : `${BASE_URL}${src}`;
+        imageUrls.push(absoluteUrl);
+      }
+    });
+
     // 마감일 재파싱
     const deadline = parseDeadline(content);
 
@@ -220,8 +232,8 @@ export async function crawlPostDetail(url: string): Promise<{ content: string; d
       ? `${url}&layout=unknown`
       : `${url}?layout=unknown`;
 
-    console.log(`Detail content length: ${content.length}, shortUrl: ${shortUrl}`);
-    return { content, deadline, shortUrl };
+    console.log(`Detail content length: ${content.length}, images: ${imageUrls.length}, shortUrl: ${shortUrl}`);
+    return { content, deadline, shortUrl, imageUrls };
   } catch (error) {
     console.error('Detail crawl error:', error);
     return null;
@@ -269,4 +281,26 @@ export async function crawlAllPosts(maxPages: number = APP_CONFIG.CRAWLER.MAX_PA
   }
 
   return allPosts;
+}
+
+/**
+ * DB original_url을 비교 가능한 정규화 형태로 변환.
+ *
+ * crawlPostDetail이 항상 ?layout=unknown(또는 &layout=unknown)을 붙여 저장하기 때문에,
+ * 목록 페이지에서 추출한 단순 URL과 직접 비교하면 100% miss가 발생한다.
+ * 이 함수는 layout=unknown 파라미터만 제거해 양쪽을 같은 키 공간으로 정규화한다.
+ *
+ * 다른 query string은 보존한다 (학교가 향후 ?artclNo= 등을 추가할 경우 안전).
+ *
+ * @example
+ *   normalizeOriginalUrl('https://x.kr/a/artclView.do?layout=unknown')        → 'https://x.kr/a/artclView.do'
+ *   normalizeOriginalUrl('https://x.kr/a?page=2&layout=unknown')               → 'https://x.kr/a?page=2'
+ *   normalizeOriginalUrl('https://x.kr/a?layout=unknown&page=2')               → 'https://x.kr/a?page=2'
+ *   normalizeOriginalUrl('https://x.kr/a/artclView.do')                        → 'https://x.kr/a/artclView.do'
+ */
+export function normalizeOriginalUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  return url
+    .replace(/([?&])layout=unknown(&|$)/g, (_, pre, post) => (post === '&' ? pre : ''))
+    .replace(/[?&]$/, '');
 }
