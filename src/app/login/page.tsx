@@ -36,8 +36,8 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-block">
             <h1 className="text-3xl font-bold">
-              <span className="text-[#033885]">Kong</span>
-              <span className="text-slate-800 dark:text-white">-Link</span>
+              <span className="text-[#033885]">KNU</span>
+              <span className="text-slate-800 dark:text-white">Pick</span>
             </h1>
           </Link>
           <p className="text-slate-600 dark:text-slate-400 mt-2">

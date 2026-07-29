@@ -1,295 +1,437 @@
 'use client';
 
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { DEPARTMENTS_WITH_KEYWORDS } from '@/lib/constants';
+import { ACTIVITY_TYPES, ACTIVITY_COLORS, DEPARTMENTS_WITH_KEYWORDS } from '@/lib/constants';
 import type { Campus } from '@/types';
 
-const CAMPUS_OPTIONS: { value: Campus | null; label: string }[] = [
-  { value: null, label: '전체 캠퍼스' },
-  { value: 'kongju', label: '공주 캠퍼스' },
-  { value: 'cheonan', label: '천안 캠퍼스' },
-  { value: 'yesan', label: '예산 캠퍼스' },
+const CAMPUS_TABS: { value: Campus | null; label: string }[] = [
+  { value: null, label: '전체' },
+  { value: 'kongju', label: '공주' },
+  { value: 'cheonan', label: '천안' },
+  { value: 'yesan', label: '예산' },
 ];
 
 interface FilterPanelProps {
   selectedDepartment: number | null;
   onDepartmentChange: (id: number | null) => void;
+  selectedActivityTypes: number[];
+  onActivityTypeToggle: (id: number) => void;
   selectedCampus: Campus | null;
   onCampusChange: (campus: Campus | null) => void;
-  isMobileOpen?: boolean;
-  onMobileToggle?: () => void;
-  showExpired?: boolean;
-  onShowExpiredChange?: (show: boolean) => void;
+  showExpired: boolean;
+  onShowExpiredChange: (show: boolean) => void;
+  sort: string;
+  onSortChange: (sort: string) => void;
+  resultCount: number;
 }
 
-export default function FilterPanel({ selectedDepartment, onDepartmentChange, selectedCampus, onCampusChange, isMobileOpen = false, onMobileToggle, showExpired = false, onShowExpiredChange }: FilterPanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
+export default function FilterPanel({
+  selectedDepartment,
+  onDepartmentChange,
+  selectedActivityTypes,
+  onActivityTypeToggle,
+  selectedCampus,
+  onCampusChange,
+  showExpired,
+  onShowExpiredChange,
+  sort,
+  onSortChange,
+  resultCount,
+}: FilterPanelProps) {
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [deptQuery, setDeptQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 바깥 클릭 시 드롭다운 닫기
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
+    const onClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDeptOpen(false);
       }
     };
+    if (deptOpen) document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [deptOpen]);
 
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [isOpen]);
-
-  // 캠퍼스별로 그룹화
-  const groupedDepartments = useMemo(() => {
-    const grouped: Record<string, { college: string; departments: { id: number; name: string }[] }[]> = {};
-
-    DEPARTMENTS_WITH_KEYWORDS.forEach((dept, index) => {
-      if (!grouped[dept.campus]) {
-        grouped[dept.campus] = [];
-      }
-
-      const collegeGroup = grouped[dept.campus].find(g => g.college === dept.college);
-      if (collegeGroup) {
-        collegeGroup.departments.push({ id: index + 1, name: dept.name });
-      } else {
-        grouped[dept.campus].push({
-          college: dept.college,
-          departments: [{ id: index + 1, name: dept.name }],
-        });
-      }
+  const grouped = useMemo(() => {
+    const m: Record<string, { college: string; depts: { id: number; name: string }[] }[]> = {};
+    DEPARTMENTS_WITH_KEYWORDS.forEach((d, idx) => {
+      if (!m[d.campus]) m[d.campus] = [];
+      const g = m[d.campus].find((g) => g.college === d.college);
+      const dept = { id: idx + 1, name: d.name };
+      if (g) g.depts.push(dept);
+      else m[d.campus].push({ college: d.college, depts: [dept] });
     });
-
-    return grouped;
+    return m;
   }, []);
 
-  // 검색 필터링
-  const filteredDepartments = useMemo(() => {
-    if (!searchQuery) return null;
+  const filteredDepts = useMemo(() => {
+    if (!deptQuery.trim()) return null;
+    return DEPARTMENTS_WITH_KEYWORDS.map((d, idx) => ({ ...d, id: idx + 1 })).filter(
+      (d) =>
+        d.name.toLowerCase().includes(deptQuery.toLowerCase()) ||
+        d.college.toLowerCase().includes(deptQuery.toLowerCase())
+    );
+  }, [deptQuery]);
 
-    return DEPARTMENTS_WITH_KEYWORDS
-      .map((dept, index) => ({ ...dept, id: index + 1 }))
-      .filter(dept =>
-        dept.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        dept.college.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-  }, [searchQuery]);
-
-  const selectedDeptInfo = selectedDepartment
+  const selectedDept = selectedDepartment
     ? DEPARTMENTS_WITH_KEYWORDS[selectedDepartment - 1]
     : null;
 
-  // 선택된 필터 개수 계산
-  const activeFilterCount = (selectedCampus ? 1 : 0) + (selectedDepartment ? 1 : 0);
-
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-4 mb-4">
-      {/* 모바일 토글 버튼 */}
-      <button
-        onClick={onMobileToggle}
-        className="lg:hidden w-full flex items-center justify-between"
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* 활동유형 칩 바 */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+        }}
       >
-        <div className="flex items-center gap-2">
-          <svg className="w-5 h-5 text-[#033885]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-          </svg>
-          <span className="font-semibold text-slate-900 dark:text-white">필터</span>
-          {activeFilterCount > 0 && (
-            <span className="px-2 py-0.5 text-xs font-medium bg-[#033885] text-white rounded-full">
-              {activeFilterCount}
-            </span>
-          )}
-        </div>
-        <svg
-          className={`w-5 h-5 text-slate-500 transition-transform duration-200 ${isMobileOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
+        <FilterChip
+          active={selectedActivityTypes.length === 0}
+          onClick={() => {
+            // 전체 클릭 시 모든 선택 해제
+            selectedActivityTypes.forEach((id) => onActivityTypeToggle(id));
+          }}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {/* 필터 내용 - 모바일에서 조건부, 데스크톱에서 항상 표시 */}
-      <div className={`${isMobileOpen ? 'block' : 'hidden'} lg:block mt-4 lg:mt-0`}>
-        {/* 캠퍼스 선택 */}
-        <div className="mb-4">
-        <h2 className="font-semibold text-slate-900 dark:text-white mb-2">
-          캠퍼스
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {CAMPUS_OPTIONS.map((option) => (
-            <button
-              key={option.value || 'all'}
-              onClick={() => onCampusChange(option.value)}
-              className={`px-3 py-1.5 text-sm rounded-lg transition-colors
-                ${selectedCampus === option.value
-                  ? 'bg-[#033885] text-white'
-                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
-                }`}
+          전체
+        </FilterChip>
+        {ACTIVITY_TYPES.map((at) => {
+          const on = selectedActivityTypes.includes(at.id);
+          const color = ACTIVITY_COLORS[at.id];
+          return (
+            <FilterChip
+              key={at.id}
+              active={on}
+              activeColor={color}
+              onClick={() => onActivityTypeToggle(at.id)}
             >
-              {option.label}
-            </button>
-          ))}
-        </div>
+              <span>{at.icon}</span>
+              {at.name}
+            </FilterChip>
+          );
+        })}
       </div>
 
-      {/* 마감됨 표시 토글 */}
-      {onShowExpiredChange && (
-        <div className="mb-4">
-          <button
-            onClick={() => onShowExpiredChange(!showExpired)}
-            className="flex items-center gap-2 w-full"
-          >
-            <div
-              className={`relative w-10 h-5 rounded-full transition-colors ${
-                showExpired ? 'bg-[#033885]' : 'bg-slate-300 dark:bg-slate-600'
-              }`}
-            >
-              <div
-                className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
-                  showExpired ? 'translate-x-5' : 'translate-x-0.5'
-                }`}
-              />
-            </div>
-            <span className="text-sm text-slate-700 dark:text-slate-300">
-              마감된 일정 표시
-            </span>
-          </button>
+      {/* 캠퍼스 탭 + 학과 + 정렬 + 마감 토글 */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}
+      >
+        {/* 캠퍼스 탭 */}
+        <div style={{ display: 'flex', gap: 2 }}>
+          {CAMPUS_TABS.map((c) => {
+            const active = selectedCampus === c.value;
+            return (
+              <button
+                key={c.value || 'all'}
+                onClick={() => onCampusChange(c.value)}
+                style={{
+                  all: 'unset',
+                  cursor: 'pointer',
+                  padding: '6px 12px',
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: active ? 'var(--accent)' : 'var(--text-dim)',
+                  borderBottom: `2px solid ${active ? 'var(--accent)' : 'transparent'}`,
+                  transition: 'color .15s',
+                }}
+              >
+                {c.label}
+              </button>
+            );
+          })}
         </div>
-      )}
 
-      <hr className="border-slate-200 dark:border-slate-600 mb-4" />
-
-      {/* 학과 선택 */}
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold text-slate-900 dark:text-white">
-          학과 선택
-        </h2>
-        {selectedDepartment && (
+        {/* 학과 셀렉터 */}
+        <div ref={dropdownRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => onDepartmentChange(null)}
-            className="text-sm text-[#033885] hover:underline"
-          >
-            초기화
-          </button>
-        )}
-      </div>
-
-      {/* 선택된 학과 표시 */}
-      {selectedDeptInfo && (
-        <div className="mb-3 p-3 bg-[#033885]/10 rounded-xl">
-          <p className="text-sm text-[#033885] font-medium">
-            {selectedDeptInfo.campus} · {selectedDeptInfo.college}
-          </p>
-          <p className="text-lg font-bold text-slate-900 dark:text-white">
-            {selectedDeptInfo.name}
-          </p>
-        </div>
-      )}
-
-      {/* 검색 입력 및 드롭다운 */}
-      <div ref={dropdownRef}>
-        <div className="relative mb-3">
-          <input
-            type="text"
-            placeholder="학과 검색..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setIsOpen(true);
+            onClick={() => setDeptOpen((v) => !v)}
+            className="btn-press"
+            style={{
+              all: 'unset',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 999,
+              border: '1px solid var(--border-soft)',
+              background: selectedDept ? 'var(--accent-soft)' : 'var(--surface)',
+              color: selectedDept ? 'var(--accent)' : 'var(--text-mute)',
+              fontSize: 12,
+              fontWeight: 600,
             }}
-            onFocus={() => setIsOpen(true)}
-            className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                       text-slate-900 dark:text-white placeholder-slate-400
-                       focus:outline-none focus:ring-2 focus:ring-[#033885]/50
-                       transition-all duration-200"
-          />
-          <svg
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </div>
-
-        {/* 드롭다운 목록 */}
-        {isOpen && (
-        <div className="max-h-64 overflow-y-auto border border-slate-200 dark:border-slate-600 rounded-xl">
-          {filteredDepartments ? (
-            // 검색 결과
-            filteredDepartments.length > 0 ? (
-              <div className="p-2">
-                {filteredDepartments.map((dept) => (
-                  <button
-                    key={dept.id}
-                    onClick={() => {
-                      onDepartmentChange(dept.id);
-                      setSearchQuery('');
-                      setIsOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition-colors
-                      ${selectedDepartment === dept.id
-                        ? 'bg-[#033885] text-white'
-                        : 'hover:bg-slate-100 dark:hover:bg-slate-700'
-                      }`}
-                  >
-                    <p className="text-sm font-medium">{dept.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-300">
-                      {dept.campus} · {dept.college}
-                    </p>
-                  </button>
-                ))}
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+              <path d="M6 12v5c3 3 9 3 12 0v-5" />
+            </svg>
+            {selectedDept ? selectedDept.name : '학과 선택'}
+            {selectedDept && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDepartmentChange(null);
+                }}
+                style={{
+                  marginLeft: 2,
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: 'var(--accent)',
+                  color: '#fff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 10,
+                  fontWeight: 800,
+                }}
+              >
+                ×
+              </span>
+            )}
+          </button>
+          {deptOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 6px)',
+                left: 0,
+                width: 320,
+                maxHeight: 380,
+                background: 'var(--surface)',
+                border: '1px solid var(--border-soft)',
+                borderRadius: 14,
+                boxShadow: 'var(--shadow-pop)',
+                zIndex: 30,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <div style={{ padding: 10, borderBottom: '1px solid var(--border-soft)' }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={deptQuery}
+                  onChange={(e) => setDeptQuery(e.target.value)}
+                  placeholder="학과 검색"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border-soft)',
+                    background: 'var(--surface-2)',
+                    fontSize: 13,
+                    color: 'var(--text)',
+                  }}
+                />
               </div>
-            ) : (
-              <p className="p-4 text-center text-slate-500 dark:text-slate-400">검색 결과가 없습니다</p>
-            )
-          ) : (
-            // 전체 목록 (캠퍼스별)
-            Object.entries(groupedDepartments).map(([campus, colleges]) => (
-              <div key={campus} className="p-2">
-                <p className="px-3 py-1 text-xs font-bold text-slate-400 dark:text-slate-300 uppercase">
-                  {campus} 캠퍼스
-                </p>
-                {colleges.map((collegeGroup) => (
-                  <div key={collegeGroup.college} className="mb-2">
-                    <p className="px-3 py-1 text-sm font-semibold text-slate-600 dark:text-slate-300">
-                      {collegeGroup.college}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {filteredDepts ? (
+                  filteredDepts.length > 0 ? (
+                    <div style={{ padding: 6 }}>
+                      {filteredDepts.map((d) => (
+                        <DeptItem
+                          key={d.id}
+                          active={selectedDepartment === d.id}
+                          onClick={() => {
+                            onDepartmentChange(d.id);
+                            setDeptOpen(false);
+                            setDeptQuery('');
+                          }}
+                          name={d.name}
+                          sub={`${d.campus} · ${d.college}`}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ padding: 24, textAlign: 'center', color: 'var(--text-dim)', fontSize: 13 }}>
+                      검색 결과가 없습니다
                     </p>
-                    {collegeGroup.departments.map((dept) => (
-                      <button
-                        key={dept.id}
-                        onClick={() => {
-                          onDepartmentChange(dept.id);
-                          setSearchQuery('');
-                          setIsOpen(false);
+                  )
+                ) : (
+                  Object.entries(grouped).map(([campus, colleges]) => (
+                    <div key={campus} style={{ padding: 6 }}>
+                      <div
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: 'var(--text-dim)',
+                          letterSpacing: 0.8,
+                          textTransform: 'uppercase',
                         }}
-                        className={`w-full text-left px-3 py-1.5 text-sm rounded-lg transition-colors
-                          ${selectedDepartment === dept.id
-                            ? 'bg-[#033885] text-white'
-                            : 'hover:bg-slate-100 dark:hover:bg-slate-700'
-                          }`}
                       >
-                        {dept.name}
-                      </button>
-                    ))}
-                  </div>
-                ))}
+                        {campus} 캠퍼스
+                      </div>
+                      {colleges.map((cg) => (
+                        <div key={cg.college} style={{ marginBottom: 4 }}>
+                          <div
+                            style={{
+                              padding: '4px 12px',
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: 'var(--text-mute)',
+                            }}
+                          >
+                            {cg.college}
+                          </div>
+                          {cg.depts.map((d) => (
+                            <DeptItem
+                              key={d.id}
+                              active={selectedDepartment === d.id}
+                              onClick={() => {
+                                onDepartmentChange(d.id);
+                                setDeptOpen(false);
+                                setDeptQuery('');
+                              }}
+                              name={d.name}
+                            />
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                )}
               </div>
-            ))
+            </div>
           )}
         </div>
-        )}
-      </div>
 
+        <div style={{ flex: 1 }} />
+
+        {/* 결과 카운트 */}
+        <span style={{ fontSize: 12, color: 'var(--text-dim)', fontWeight: 600 }}>
+          {resultCount.toLocaleString()}건
+        </span>
+
+        {/* 마감 숨김 */}
+        <label
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            fontSize: 12,
+            color: 'var(--text-mute)',
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={!showExpired}
+            onChange={(e) => onShowExpiredChange(!e.target.checked)}
+            style={{ accentColor: 'var(--accent)' }}
+          />
+          마감 숨기기
+        </label>
+
+        {/* 정렬 */}
+        <select
+          value={sort}
+          onChange={(e) => onSortChange(e.target.value)}
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border-soft)',
+            borderRadius: 8,
+            padding: '6px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--text)',
+            cursor: 'pointer',
+          }}
+        >
+          <option value="latest">최신순</option>
+          <option value="deadline">마감 임박순</option>
+        </select>
       </div>
     </div>
+  );
+}
+
+function FilterChip({
+  children,
+  active,
+  activeColor,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active: boolean;
+  activeColor?: string;
+  onClick: () => void;
+}) {
+  // activeColor가 없는 "전체" 칩은 accent 사용 (다크모드에서도 또렷)
+  const bg = active ? activeColor || 'var(--accent)' : 'var(--surface)';
+  return (
+    <button
+      onClick={onClick}
+      className="btn-press"
+      style={{
+        all: 'unset',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '6px 14px',
+        borderRadius: 999,
+        fontSize: 13,
+        fontWeight: 600,
+        background: bg,
+        color: active ? '#fff' : 'var(--text-mute)',
+        border: `1px solid ${active ? 'transparent' : 'var(--border-soft)'}`,
+        transition: 'all .15s',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DeptItem({
+  active,
+  onClick,
+  name,
+  sub,
+}: {
+  active: boolean;
+  onClick: () => void;
+  name: string;
+  sub?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        all: 'unset',
+        cursor: 'pointer',
+        display: 'block',
+        width: '100%',
+        padding: '8px 12px',
+        borderRadius: 8,
+        background: active ? 'var(--accent)' : 'transparent',
+        color: active ? '#fff' : 'var(--text)',
+        boxSizing: 'border-box',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = 'var(--surface-2)';
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 600 }}>{name}</div>
+      {sub && (
+        <div style={{ fontSize: 11, color: active ? 'rgba(255,255,255,0.8)' : 'var(--text-dim)' }}>
+          {sub}
+        </div>
+      )}
+    </button>
   );
 }

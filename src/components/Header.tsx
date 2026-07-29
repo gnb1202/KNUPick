@@ -1,12 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+
+const NAV_ITEMS = [
+  { href: '/', label: '홈' },
+  { href: '/calendar', label: '캘린더' },
+  { href: '/bookmarks', label: '북마크' },
+];
 
 export default function Header() {
   const { user, profile, isLoading, mounted: authMounted } = useAuth();
   const { theme, setTheme, mounted } = useTheme();
+  const pathname = usePathname();
 
   const cycleTheme = () => {
     if (theme === 'light') setTheme('dark');
@@ -14,125 +22,270 @@ export default function Header() {
     else setTheme('light');
   };
 
+  const isActive = (href: string) =>
+    href === '/' ? pathname === '/' : pathname?.startsWith(href);
+
   return (
-    <header className="sticky top-0 z-50 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-700">
-      <div className="max-w-6xl mx-auto px-4 py-3">
-        <div className="flex items-center justify-between">
-          {/* 왼쪽: 캘린더 버튼 */}
-          <div className="flex items-center gap-2">
-            <Link
-              href="/calendar"
-              className="inline-flex items-center gap-2 px-4 py-2
-                         bg-gradient-to-r from-[#033885] to-[#01a753]
-                         text-white text-sm font-semibold rounded-lg
-                         shadow-md shadow-[#033885]/20
-                         hover:shadow-lg hover:shadow-[#033885]/30
-                         transition-all duration-200"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              <span>캘린더</span>
-            </Link>
-
-            {/* 북마크 링크 (로그인 시만 표시) */}
-            {user && (
-              <Link
-                href="/bookmarks"
-                className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                title="북마크"
-              >
-                <svg className="w-5 h-5 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                </svg>
-              </Link>
-            )}
-
-            {/* 관리자 링크 (관리자만 표시) */}
-            {profile?.is_admin && (
-              <Link
-                href="/admin"
-                className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-                title="관리자 대시보드"
-              >
-                <svg className="w-5 h-5 text-slate-600 dark:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-              </Link>
-            )}
+    <header
+      className="sticky top-0 z-50"
+      style={{
+        background: 'color-mix(in oklab, var(--surface) 88%, transparent)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+        borderBottom: '1px solid var(--border-soft)',
+      }}
+    >
+      <div
+        className="mx-auto"
+        style={{
+          maxWidth: 1180,
+          padding: '12px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 24,
+        }}
+      >
+        {/* 로고 */}
+        <Link
+          href="/"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            textDecoration: 'none',
+            color: 'var(--text)',
+          }}
+        >
+          <div
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 9,
+              background: 'var(--accent)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 15,
+              fontWeight: 800,
+              letterSpacing: -0.5,
+            }}
+          >
+            K
           </div>
+          <span
+            style={{
+              fontSize: 18,
+              fontWeight: 800,
+              letterSpacing: -0.5,
+            }}
+          >
+            KNUPick
+          </span>
+        </Link>
 
-          {/* 중앙: 로고 */}
-          <Link href="/" className="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
-            <div className="w-9 h-9 bg-[#033885] rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold text-base">K</span>
-            </div>
-            <div className="hidden sm:block">
-              <h1 className="text-lg font-bold text-slate-900 dark:text-white leading-tight">
-                KNUPick
-              </h1>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
-                공주대 대회/대외활동
-              </p>
-            </div>
+        {/* 데스크탑 네비 */}
+        <nav className="hidden md:flex" style={{ gap: 4 }}>
+          {NAV_ITEMS.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="btn-press"
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 10,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  color: active ? 'var(--accent)' : 'var(--text-mute)',
+                  background: active ? 'var(--accent-soft)' : 'transparent',
+                  transition: 'background .15s, color .15s',
+                }}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div style={{ flex: 1 }} />
+
+        {/* 우측 액션 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {/* 모바일 nav 단축 (캘린더 / 북마크 아이콘) */}
+          <Link
+            href="/calendar"
+            aria-label="캘린더"
+            className="md:hidden btn-press inline-flex items-center justify-center"
+            style={{
+              padding: 8,
+              borderRadius: 10,
+              background: pathname?.startsWith('/calendar')
+                ? 'var(--accent-soft)'
+                : 'var(--surface-2)',
+              color: pathname?.startsWith('/calendar')
+                ? 'var(--accent)'
+                : 'var(--text-mute)',
+            }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
           </Link>
-
-          {/* 오른쪽: 사용자 메뉴 */}
-          <div className="flex items-center gap-2">
-
-            {/* 테마 토글 버튼 - mounted 전에는 시스템 아이콘 표시 */}
-            <button
-              onClick={cycleTheme}
-              className="p-2 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              title={mounted ? `현재: ${theme === 'light' ? '라이트' : theme === 'dark' ? '다크' : '시스템'} 모드` : '테마 변경'}
+          {user && (
+            <Link
+              href="/bookmarks"
+              aria-label="북마크"
+              className="md:hidden btn-press inline-flex items-center justify-center"
+              style={{
+                padding: 8,
+                borderRadius: 10,
+                background: pathname?.startsWith('/bookmarks')
+                  ? 'var(--accent-soft)'
+                  : 'var(--surface-2)',
+                color: pathname?.startsWith('/bookmarks')
+                  ? 'var(--accent)'
+                  : 'var(--text-mute)',
+              }}
             >
-              {!mounted ? (
-                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              ) : theme === 'light' ? (
-                <svg className="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
-                </svg>
-              ) : theme === 'dark' ? (
-                <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              )}
-            </button>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            </Link>
+          )}
 
-            {authMounted && isLoading ? (
-              <div className="w-20 h-8 bg-slate-200 dark:bg-slate-700 rounded-lg animate-pulse" />
-            ) : authMounted && user ? (
-              <Link
-                href="/profile"
-                className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800
-                         rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-              >
-                <div className="w-6 h-6 bg-[#033885] rounded-full flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">
-                    {profile?.nickname?.[0] || profile?.username?.[0]?.toUpperCase() || 'U'}
-                  </span>
-                </div>
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                  {profile?.nickname || profile?.username || '프로필'}
-                </span>
-              </Link>
+          {/* 관리자 링크 */}
+          {profile?.is_admin && (
+            <Link
+              href="/admin"
+              aria-label="관리자"
+              className="btn-press"
+              style={{
+                padding: 8,
+                borderRadius: 10,
+                background: 'var(--surface-2)',
+                color: 'var(--text-mute)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </Link>
+          )}
+
+          {/* 테마 토글 */}
+          <button
+            onClick={cycleTheme}
+            className="btn-press"
+            title={mounted ? `현재: ${theme === 'light' ? '라이트' : theme === 'dark' ? '다크' : '시스템'}` : '테마 변경'}
+            style={{
+              all: 'unset',
+              cursor: 'pointer',
+              padding: 8,
+              borderRadius: 10,
+              background: 'var(--surface-2)',
+              color: 'var(--text-mute)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {!mounted ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="4" />
+              </svg>
+            ) : theme === 'light' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#F59E0B' }}>
+                <path fillRule="evenodd" clipRule="evenodd" d="M12 4a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1zm6 8a6 6 0 1 1-12 0 6 6 0 0 1 12 0zm-1.5 6.45l1 1a1 1 0 1 0 1.41-1.41l-1-1a1 1 0 0 0-1.41 1.41zm3.05-13.95a1 1 0 0 1 0 1.41l-1 1a1 1 0 0 1-1.41-1.41l1-1a1 1 0 0 1 1.41 0zM21 13a1 1 0 1 0 0-2h-1a1 1 0 1 0 0 2h1zm-9 5a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1zM6.46 7.46A1 1 0 1 0 7.87 6.05l-.71-.71a1 1 0 0 0-1.41 1.41l.71.71zm1.41 8.49l-.71.71a1 1 0 0 1-1.41-1.41l.71-.71a1 1 0 0 1 1.41 1.41zM4 13a1 1 0 1 0 0-2H3a1 1 0 1 0 0 2h1z" />
+              </svg>
+            ) : theme === 'dark' ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#5BA3FF' }}>
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
             ) : (
-              <Link
-                href="/login"
-                className="px-4 py-1.5 bg-[#033885] text-white text-sm font-medium rounded-lg
-                         hover:bg-[#022a66] transition-colors"
-              >
-                로그인
-              </Link>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
             )}
-          </div>
+          </button>
+
+          {/* 사용자 / 로그인 */}
+          {authMounted && isLoading ? (
+            <div
+              style={{
+                width: 80,
+                height: 32,
+                borderRadius: 10,
+                background: 'var(--surface-2)',
+              }}
+              className="animate-pulse"
+            />
+          ) : authMounted && user ? (
+            <Link
+              href="/profile"
+              className="btn-press"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 10px 6px 6px',
+                borderRadius: 999,
+                background: 'var(--surface-2)',
+                textDecoration: 'none',
+                color: 'var(--text)',
+              }}
+            >
+              <span
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: '50%',
+                  background: 'var(--accent-soft)',
+                  color: 'var(--accent)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: 13,
+                }}
+              >
+                {profile?.nickname?.[0] || profile?.username?.[0]?.toUpperCase() || 'U'}
+              </span>
+              <span
+                style={{ fontSize: 13, fontWeight: 600 }}
+                className="max-md:hidden"
+              >
+                {profile?.nickname || profile?.username || '프로필'}
+              </span>
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="btn-press"
+              style={{
+                padding: '8px 14px',
+                borderRadius: 10,
+                background: 'var(--accent)',
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 700,
+                textDecoration: 'none',
+              }}
+            >
+              로그인
+            </Link>
+          )}
         </div>
       </div>
     </header>

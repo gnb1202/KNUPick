@@ -1,18 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function SignupPage() {
-  const router = useRouter();
-  const { signUp, signIn } = useAuth();
+  const { signUp, signOut } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isComplete, setIsComplete] = useState(false);
+  const [completedUsername, setCompletedUsername] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,16 +51,65 @@ export default function SignupPage() {
       return;
     }
 
-    // 회원가입 성공 후 자동 로그인
-    const { error: signInError } = await signIn(username, password);
+    // Supabase signUp은 이메일 인증이 비활성화된 환경에서 즉시 세션을 생성한다.
+    // 가입 완료 화면은 비로그인 상태여야 하므로 명시적으로 세션을 정리한다.
+    await signOut();
 
-    if (signInError) {
-      // 자동 로그인 실패해도 회원가입은 성공한 것
-      router.push('/login');
-    } else {
-      router.push('/profile');
-    }
+    setCompletedUsername(username);
+    setIsComplete(true);
+    setIsLoading(false);
   };
+
+  if (isComplete) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-8">
+            <Link href="/" className="inline-block">
+              <h1 className="text-3xl font-bold">
+                <span className="text-[#033885]">KNU</span>
+                <span className="text-slate-800 dark:text-white">Pick</span>
+              </h1>
+            </Link>
+          </div>
+
+          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-8 text-center">
+            <div className="mx-auto mb-4 w-14 h-14 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+              <svg className="w-7 h-7 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+              회원가입이 완료되었습니다
+            </h2>
+            <p className="text-slate-600 dark:text-slate-400 text-sm">
+              <span className="font-semibold text-[#033885]">{completedUsername}</span> 계정이 생성되었어요.
+            </p>
+            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
+              로그인 후 프로필을 설정하면 더 정확하게 추천해드려요.
+            </p>
+
+            <div className="mt-6 space-y-2">
+              <Link
+                href="/"
+                className="block w-full py-3 bg-[#033885] text-white font-semibold rounded-xl
+                         hover:bg-[#022a66] transition-colors duration-200"
+              >
+                홈으로 돌아가기
+              </Link>
+              <Link
+                href="/login"
+                className="block w-full py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl
+                         hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors duration-200"
+              >
+                로그인하러 가기
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
@@ -69,8 +118,8 @@ export default function SignupPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-block">
             <h1 className="text-3xl font-bold">
-              <span className="text-[#033885]">Kong</span>
-              <span className="text-slate-800 dark:text-white">-Link</span>
+              <span className="text-[#033885]">KNU</span>
+              <span className="text-slate-800 dark:text-white">Pick</span>
             </h1>
           </Link>
           <p className="text-slate-600 dark:text-slate-400 mt-2">

@@ -23,97 +23,141 @@ export default function DeadlineAlert({ userId }: DeadlineAlertProps) {
 
   useEffect(() => {
     if (!userId) return;
-
     const fetchReminders = async () => {
       try {
         const response = await fetch('/api/reminders', {
           headers: { 'x-user-id': userId },
         });
-
         if (!response.ok) return;
-
         const data = await response.json();
         setReminders(data.reminders || []);
       } catch (error) {
         console.error('알림 조회 오류:', error);
       }
     };
-
     fetchReminders();
   }, [userId]);
 
-  // 자동 슬라이드 (5초마다)
   useEffect(() => {
     if (reminders.length <= 1) return;
-
     const interval = setInterval(() => {
-      setCurrentIndex(prev => (prev + 1) % reminders.length);
+      setCurrentIndex((prev) => (prev + 1) % reminders.length);
     }, 5000);
-
     return () => clearInterval(interval);
   }, [reminders.length]);
 
   if (!userId || reminders.length === 0 || !isVisible) return null;
 
   const current = reminders[currentIndex];
-  const activityType = ACTIVITY_TYPES.find(t => current.activityTypes.includes(t.id));
+  const at = ACTIVITY_TYPES.find((t) => current.activityTypes.includes(t.id));
 
   return (
-    <div className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl shadow-lg mb-6 overflow-hidden animate-fade-in">
-      <div className="px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3 flex-1 min-w-0">
-          {/* 아이콘 */}
-          <div className="flex-shrink-0 w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-
-          {/* 내용 */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium opacity-90">
-              북마크한 공지 마감 {current.daysLeft === 0 ? '오늘' : `D-${current.daysLeft}`}
-            </p>
-            <p className="text-sm font-bold truncate">
-              {activityType?.icon} {current.title}
-            </p>
-          </div>
-
-          {/* 페이지네이션 (여러 개일 때) */}
-          {reminders.length > 1 && (
-            <div className="flex-shrink-0 flex items-center gap-1">
-              {reminders.map((_, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setCurrentIndex(idx)}
-                  className={`w-2 h-2 rounded-full transition-all ${
-                    idx === currentIndex ? 'bg-white' : 'bg-white/40'
-                  }`}
-                />
-              ))}
-            </div>
-          )}
+    <div
+      className="animate-fade-in"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+        padding: '14px 18px',
+        marginBottom: 24,
+        background: 'var(--accent-soft)',
+        border: '1px solid color-mix(in oklab, var(--accent) 20%, transparent)',
+        borderRadius: 'var(--radius-lg)',
+      }}
+    >
+      <div
+        style={{
+          width: 38,
+          height: 38,
+          borderRadius: '50%',
+          background: 'var(--accent)',
+          color: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 18,
+          flexShrink: 0,
+        }}
+      >
+        ⏰
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'var(--accent)',
+            marginBottom: 2,
+          }}
+        >
+          북마크한 공지 마감 {current.daysLeft === 0 ? '오늘' : `D-${current.daysLeft}`}
         </div>
-
-        {/* 액션 버튼 */}
-        <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-          <Link
-            href="/bookmarks"
-            className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-colors"
-          >
-            보기
-          </Link>
-          <button
-            onClick={() => setIsVisible(false)}
-            className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
-            aria-label="닫기"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight: 700,
+            color: 'var(--text)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {at?.icon} {current.title}
         </div>
       </div>
+      {reminders.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+          {reminders.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentIndex(idx)}
+              aria-label={`${idx + 1}번째`}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                border: 'none',
+                cursor: 'pointer',
+                background:
+                  idx === currentIndex
+                    ? 'var(--accent)'
+                    : 'color-mix(in oklab, var(--accent) 35%, transparent)',
+                padding: 0,
+              }}
+            />
+          ))}
+        </div>
+      )}
+      <Link
+        href="/bookmarks"
+        className="btn-press"
+        style={{
+          padding: '8px 14px',
+          borderRadius: 10,
+          background: 'var(--accent)',
+          color: '#fff',
+          fontSize: 13,
+          fontWeight: 700,
+          textDecoration: 'none',
+          flexShrink: 0,
+        }}
+      >
+        보기
+      </Link>
+      <button
+        onClick={() => setIsVisible(false)}
+        aria-label="닫기"
+        style={{
+          all: 'unset',
+          cursor: 'pointer',
+          padding: 4,
+          color: 'var(--text-dim)',
+          fontSize: 18,
+          flexShrink: 0,
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }

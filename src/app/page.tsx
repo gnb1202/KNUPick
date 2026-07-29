@@ -7,11 +7,12 @@ import FilterPanel from '@/components/FilterPanel';
 import PostList from '@/components/PostList';
 import SearchBar from '@/components/SearchBar';
 import DeadlineAlert from '@/components/DeadlineAlert';
-import FeedSection from '@/components/FeedSection';
+import RecommendedCarousel from '@/components/RecommendedCarousel';
+import ThisWeekStrip from '@/components/ThisWeekStrip';
 import { useAuth } from '@/contexts/AuthContext';
 import { PostWithBookmark, Campus } from '@/types';
-import { ACTIVITY_TYPES } from '@/lib/constants';
 import { searchInFields } from '@/lib/search';
+import { CAMPUS_LABELS } from '@/lib/constants';
 
 function HomeContent() {
   const { user, profile } = useAuth();
@@ -20,15 +21,13 @@ function HomeContent() {
 
   const [posts, setPosts] = useState<PostWithBookmark[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [showExpired, setShowExpired] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // 개인화 피드 상태
   const [recommendedPosts, setRecommendedPosts] = useState<PostWithBookmark[]>([]);
   const [isRecommendedLoading, setIsRecommendedLoading] = useState(false);
 
-  // URL에서 필터 상태 읽기 (문자열로 안정화)
+  // URL 파라미터 (문자열 안정화)
   const deptParam = searchParams.get('dept');
   const typesParam = searchParams.get('types');
   const campusParam = searchParams.get('campus');
@@ -37,212 +36,131 @@ function HomeContent() {
   const selectedDepartment = deptParam ? parseInt(deptParam) : null;
   const selectedCampus = (campusParam as Campus) || null;
 
-  // useMemo로 배열 안정화 (typesParam 문자열이 변경될 때만 재계산)
   const selectedActivityTypes = useMemo(() => {
     return typesParam ? typesParam.split(',').map(Number) : [];
   }, [typesParam]);
 
-  // 검색어 필터 적용된 게시글
   const searchedPosts = useMemo(() => {
     if (!searchQuery.trim()) return posts;
-
     return posts.filter((post) =>
       searchInFields([post.title, post.summary, post.content], searchQuery)
     );
   }, [posts, searchQuery]);
 
-  // 필터링된 게시글 개수 계산
   const filteredPostCount = useMemo(() => {
     if (showExpired) return searchedPosts.length;
-
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     return searchedPosts.filter((post) => {
       if (!post.deadline) return true;
-      const deadline = new Date(post.deadline);
-      deadline.setHours(0, 0, 0, 0);
-      return deadline >= today;
+      const d = new Date(post.deadline);
+      d.setHours(0, 0, 0, 0);
+      return d >= today;
     }).length;
   }, [searchedPosts, showExpired]);
 
-  // URL 업데이트 함수 - router.replace 사용으로 히스토리 스택 방지
-  const updateURL = useCallback((params: {
-    dept?: number | null;
-    types?: number[];
-    campus?: Campus | null;
-    sort?: string;
-  }) => {
-    const currentUrl = new URL(window.location.href);
-    const newParams = new URLSearchParams();
+  // URL 업데이트
+  const updateURL = useCallback(
+    (params: { dept?: number | null; types?: number[]; campus?: Campus | null; sort?: string }) => {
+      const currentUrl = new URL(window.location.href);
+      const newParams = new URLSearchParams();
 
-    // 현재 URL에서 직접 읽기 (searchParams 의존성 제거)
-    const currentDept = currentUrl.searchParams.get('dept');
-    const currentTypes = currentUrl.searchParams.get('types');
-    const currentCampus = currentUrl.searchParams.get('campus');
-    const currentSort = currentUrl.searchParams.get('sort');
+      const currentDept = currentUrl.searchParams.get('dept');
+      const currentTypes = currentUrl.searchParams.get('types');
+      const currentCampus = currentUrl.searchParams.get('campus');
+      const currentSort = currentUrl.searchParams.get('sort');
 
-    const dept = params.dept !== undefined ? params.dept : (currentDept ? parseInt(currentDept) : null);
-    const types = params.types !== undefined ? params.types : (currentTypes ? currentTypes.split(',').map(Number) : []);
-    const campus = params.campus !== undefined ? params.campus : currentCampus;
-    const sort = params.sort !== undefined ? params.sort : currentSort;
+      const dept = params.dept !== undefined ? params.dept : currentDept ? parseInt(currentDept) : null;
+      const types = params.types !== undefined ? params.types : currentTypes ? currentTypes.split(',').map(Number) : [];
+      const campus = params.campus !== undefined ? params.campus : currentCampus;
+      const sort = params.sort !== undefined ? params.sort : currentSort;
 
-    if (dept) newParams.set('dept', String(dept));
-    if (types.length > 0) newParams.set('types', types.join(','));
-    if (campus) newParams.set('campus', campus);
-    if (sort && sort !== 'latest') newParams.set('sort', sort);
+      if (dept) newParams.set('dept', String(dept));
+      if (types.length > 0) newParams.set('types', types.join(','));
+      if (campus) newParams.set('campus', campus);
+      if (sort && sort !== 'latest') newParams.set('sort', sort);
 
-    const queryString = newParams.toString();
-    router.replace(queryString ? `/?${queryString}` : '/', { scroll: false });
-  }, [router]);
+      const queryString = newParams.toString();
+      router.replace(queryString ? `/?${queryString}` : '/', { scroll: false });
+    },
+    [router]
+  );
 
-  // 필터 변경 핸들러
-  const handleDepartmentChange = useCallback((dept: number | null) => {
-    updateURL({ dept });
-  }, [updateURL]);
+  const handleDepartmentChange = useCallback((dept: number | null) => updateURL({ dept }), [updateURL]);
+  const handleCampusChange = useCallback((campus: Campus | null) => updateURL({ campus }), [updateURL]);
+  const handleActivityTypeToggle = useCallback(
+    (id: number) => {
+      const currentUrl = new URL(window.location.href);
+      const currentTypesStr = currentUrl.searchParams.get('types');
+      const currentTypes = currentTypesStr ? currentTypesStr.split(',').map(Number) : [];
+      const newTypes = currentTypes.includes(id)
+        ? currentTypes.filter((t) => t !== id)
+        : [...currentTypes, id];
+      updateURL({ types: newTypes });
+    },
+    [updateURL]
+  );
+  const handleSortChange = useCallback((sort: string) => updateURL({ sort }), [updateURL]);
 
-  const handleCampusChange = useCallback((campus: Campus | null) => {
-    updateURL({ campus });
-  }, [updateURL]);
-
-  const handleActivityTypeToggle = useCallback((id: number) => {
-    const currentUrl = new URL(window.location.href);
-    const currentTypesStr = currentUrl.searchParams.get('types');
-    const currentTypes = currentTypesStr ? currentTypesStr.split(',').map(Number) : [];
-    const newTypes = currentTypes.includes(id)
-      ? currentTypes.filter((t) => t !== id)
-      : [...currentTypes, id];
-    updateURL({ types: newTypes });
-  }, [updateURL]);
-
-  const handleSortChange = useCallback((sort: string) => {
-    updateURL({ sort });
-  }, [updateURL]);
-
-  // 프로필 기반 초기 필터 설정 (URL 파라미터가 없을 때만)
-  const initializedRef = useRef(false);
-
-  // 이전 파라미터 추적 (중복 호출 방지)
+  // 기본은 사용자 preference와 무관하게 전체 보기.
+  // 필터링은 사용자가 직접 FilterPanel에서 선택했을 때만 적용된다.
   const prevParamsRef = useRef<string | null>(null);
 
-  // 컴포넌트 언마운트 시 refs 초기화
   useEffect(() => {
     return () => {
-      initializedRef.current = false;
       prevParamsRef.current = null;
     };
   }, []);
 
+  // posts 로드
   useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-
-    // URL에 이미 파라미터가 있으면 건너뜀
-    if (window.location.search) return;
-
-    // 프로필이 있고 URL 파라미터가 없을 때만 초기화
-    if (profile) {
-      const params: { dept?: number; types?: number[]; campus?: Campus } = {};
-
-      if (profile.campus) params.campus = profile.campus;
-      if (profile.department_id) params.dept = profile.department_id;
-      if (profile.preferred_activity_types?.length) params.types = profile.preferred_activity_types;
-
-      if (Object.keys(params).length > 0) {
-        updateURL(params);
-      }
-    }
-  }, [profile, updateURL]);
-
-  // 초기 로드 및 필터 변경 시
-  useEffect(() => {
-    // 파라미터 조합을 문자열로 만들어 비교
-    const currentParamsKey = `${deptParam || ''}-${typesParam || ''}-${campusParam || ''}-${sortParam}`;
-
-    // 이전과 같으면 스킵 (중복 호출 방지) - 단, 첫 마운트(null)일 때는 항상 실행
-    if (prevParamsRef.current !== null && prevParamsRef.current === currentParamsKey) {
-      return;
-    }
+    const currentParamsKey = `${deptParam || ''}-${typesParam || ''}-${campusParam || ''}-${sortParam}-${user?.id || ''}`;
+    if (prevParamsRef.current !== null && prevParamsRef.current === currentParamsKey) return;
     prevParamsRef.current = currentParamsKey;
 
     const controller = new AbortController();
-
     const fetchData = async () => {
       setIsLoading(true);
-
       try {
-        const params = new URLSearchParams({
-          pageSize: '200',
-        });
-
-        if (deptParam) {
-          params.set('departmentId', deptParam);
-        }
-
-        if (typesParam) {
-          params.set('activityTypes', typesParam);
-        }
-
-        if (campusParam) {
-          params.set('campus', campusParam);
-        }
-
-        if (sortParam && sortParam !== 'latest') {
-          params.set('sort', sortParam);
-        }
+        const params = new URLSearchParams({ pageSize: '200' });
+        if (deptParam) params.set('departmentId', deptParam);
+        if (typesParam) params.set('activityTypes', typesParam);
+        if (campusParam) params.set('campus', campusParam);
+        if (sortParam && sortParam !== 'latest') params.set('sort', sortParam);
 
         const headers: HeadersInit = {};
-        if (user?.id) {
-          headers['x-user-id'] = user.id;
-        }
+        if (user?.id) headers['x-user-id'] = user.id;
 
         const response = await fetch(`/api/posts?${params}`, {
           signal: controller.signal,
           headers,
         });
-
-        if (!response.ok) {
-          throw new Error('Failed to fetch posts');
-        }
-
+        if (!response.ok) throw new Error('Failed to fetch posts');
         const data = await response.json();
-
         setPosts(data.posts);
         setIsLoading(false);
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          return; // 취소된 요청은 무시 (isLoading도 변경하지 않음)
-        }
+        if (error instanceof Error && error.name === 'AbortError') return;
         console.error('Fetch error:', error);
         setPosts([]);
         setIsLoading(false);
       }
     };
-
     fetchData();
-
-    return () => {
-      controller.abort();
-    };
+    return () => controller.abort();
   }, [deptParam, typesParam, campusParam, sortParam, user?.id]);
 
-  // 북마크 변경 핸들러
   const handleBookmarkChange = useCallback((postId: number, isBookmarked: boolean) => {
-    setPosts(prev => prev.map(post =>
-      post.id === postId ? { ...post, isBookmarked } : post
-    ));
-    setRecommendedPosts(prev => prev.map(post =>
-      post.id === postId ? { ...post, isBookmarked } : post
-    ));
+    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, isBookmarked } : p)));
+    setRecommendedPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, isBookmarked } : p)));
   }, []);
 
-  // 추천 게시물 로드 (로그인 사용자만)
+  // 추천 로드
   useEffect(() => {
     if (!user?.id) {
       setRecommendedPosts([]);
       return;
     }
-
     const fetchRecommendations = async () => {
       setIsRecommendedLoading(true);
       try {
@@ -259,200 +177,199 @@ function HomeContent() {
         setIsRecommendedLoading(false);
       }
     };
-
     fetchRecommendations();
   }, [user?.id]);
 
-  // 마감 임박 게시물 (D-7 이내)
-  const urgentPosts = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const sevenDaysLater = new Date(today);
-    sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
-
-    return posts
-      .filter(post => {
-        if (!post.deadline) return false;
-        const deadline = new Date(post.deadline);
-        deadline.setHours(0, 0, 0, 0);
-        return deadline >= today && deadline <= sevenDaysLater;
-      })
-      .sort((a, b) => new Date(a.deadline!).getTime() - new Date(b.deadline!).getTime())
-      .slice(0, 6);
-  }, [posts]);
+  // 인사 — 닉네임 + 학과/캠퍼스
+  const greetingName = profile?.nickname || profile?.username;
+  const campusLabel = profile?.campus ? CAMPUS_LABELS[profile.campus] : null;
 
   return (
-    <div className="min-h-screen">
-      {/* 헤더 */}
+    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      {/* 메인 컨텐츠 */}
-      <main className="max-w-6xl mx-auto px-4 py-6">
-        {/* 마감 알림 배너 (로그인 사용자만) */}
-        <DeadlineAlert userId={user?.id || null} />
-
-        {/* Hero 섹션 */}
-        <section className="text-center mb-8 animate-fade-in">
-          <h2 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white mb-2">
-            나에게 딱 맞는 활동을 찾아보세요
-          </h2>
-          <p className="text-slate-600 dark:text-slate-300 mb-6">
-            학과를 선택하면 관련된 대회와 대외활동을 추천해드려요
-          </p>
-
-          {/* 활동유형 필터 */}
-          <div className="flex flex-wrap justify-center gap-2">
-            {ACTIVITY_TYPES.map((type) => {
-              const isSelected = selectedActivityTypes.includes(type.id);
-              return (
-                <button
-                  key={type.id}
-                  onClick={() => handleActivityTypeToggle(type.id)}
-                  className={`
-                    px-3 py-1.5 text-sm font-medium rounded-full
-                    transition-all duration-200 btn-press border
-                    ${isSelected
-                      ? 'bg-[#033885] text-white shadow-md border-[#033885]'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border-slate-300 dark:border-slate-600'
-                    }
-                  `}
-                >
-                  {type.icon && <span className="mr-1">{type.icon}</span>}
-                  {type.name}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* 사이드바 - 필터 */}
-          <aside className="lg:col-span-1">
-            <FilterPanel
-              selectedDepartment={selectedDepartment}
-              onDepartmentChange={handleDepartmentChange}
-              selectedCampus={selectedCampus}
-              onCampusChange={handleCampusChange}
-              isMobileOpen={isFilterOpen}
-              onMobileToggle={() => setIsFilterOpen(!isFilterOpen)}
-              showExpired={showExpired}
-              onShowExpiredChange={setShowExpired}
-            />
-          </aside>
-
-          {/* 게시글 목록 */}
-          <section className="lg:col-span-3">
-            {/* 검색바 */}
-            <SearchBar
-              value={searchQuery}
-              onChange={setSearchQuery}
-              placeholder="공지 검색 (초성 검색 가능: ㅈㅎㄱ → 장학금)"
-              className="mb-4"
-            />
-
-            {/* 개인화 피드 섹션 (로그인 사용자, 검색 중이 아닐 때) */}
-            {user && !searchQuery && !deptParam && !typesParam && !campusParam && (
+      <main
+        style={{
+          maxWidth: 1180,
+          margin: '0 auto',
+          padding: '32px 24px 64px',
+          display: 'grid',
+          gap: 32,
+        }}
+      >
+        {/* 인사 헤딩 */}
+        <section className="animate-fade-up">
+          {greetingName && campusLabel && (
+            <div style={{ fontSize: 13, color: 'var(--text-dim)', fontWeight: 600 }}>
+              {profile?.department_id ? `학과 추천 · ` : ''}
+              {campusLabel}캠퍼스
+            </div>
+          )}
+          <h1
+            style={{
+              margin: '6px 0 0',
+              fontSize: 28,
+              fontWeight: 800,
+              color: 'var(--text)',
+              letterSpacing: -0.7,
+              lineHeight: 1.2,
+            }}
+          >
+            {greetingName ? (
               <>
-                {/* 마감 임박 섹션 */}
-                {urgentPosts.length > 0 && (
-                  <FeedSection
-                    title="⏰ 마감 임박"
-                    posts={urgentPosts}
-                    userId={user.id}
-                    onBookmarkChange={handleBookmarkChange}
-                    emptyMessage="마감 임박 공지가 없습니다."
-                    maxItems={6}
-                  />
-                )}
-
-                {/* 맞춤 추천 섹션 */}
-                <FeedSection
-                  title="✨ 맞춤 추천"
-                  posts={recommendedPosts}
-                  isLoading={isRecommendedLoading}
-                  userId={user.id}
-                  onBookmarkChange={handleBookmarkChange}
-                  emptyMessage="추천할 공지를 찾고 있어요. 프로필에서 관심 키워드를 설정해보세요!"
-                  maxItems={6}
-                />
+                {greetingName}님, 오늘{' '}
+                <span style={{ color: 'var(--accent)' }}>{filteredPostCount}건</span>의 공지를
+                골라봤어요
+              </>
+            ) : (
+              <>
+                나에게 딱 맞는 활동을{' '}
+                <span style={{ color: 'var(--accent)' }}>찾아보세요</span>
               </>
             )}
+          </h1>
+          {!greetingName && (
+            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-mute)' }}>
+              학과와 관심분야를 설정하면 더 정확하게 추천해드려요
+            </p>
+          )}
+        </section>
 
-            {/* 검색 결과 + 정렬 바 */}
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-slate-600 dark:text-slate-300">
-                <span className="font-bold text-[#033885] text-xl">{filteredPostCount}</span>
-                <span className="ml-1">건의 활동</span>
-                {searchQuery && (
-                  <span className="ml-2 text-sm text-slate-500">
-                    &quot;{searchQuery}&quot; 검색 결과
-                  </span>
-                )}
-              </p>
+        {/* 마감 알림 */}
+        <DeadlineAlert userId={user?.id || null} />
 
-              {/* 정렬 버튼 그룹 */}
-              <div className="flex bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                <button
-                  onClick={() => handleSortChange('latest')}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    sortParam === 'latest'
-                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885] dark:text-blue-400'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
+        {/* 검색 */}
+        <SearchBar value={searchQuery} onChange={setSearchQuery} />
+
+        {/* 다가오는 2주 마감/행사 */}
+        {!isLoading && <ThisWeekStrip posts={posts} />}
+
+        {/* 추천 — 로그인 사용자만 */}
+        {user && (
+          <RecommendedCarousel
+            title={`✨ ${greetingName || '나'}님께 딱 맞는 공지`}
+            posts={recommendedPosts}
+            isLoading={isRecommendedLoading}
+            userId={user.id}
+            onBookmarkChange={handleBookmarkChange}
+            emptyMessage="추천할 공지를 찾고 있어요. 프로필에서 관심 키워드를 설정해보세요!"
+            perPage={3}
+          />
+        )}
+
+        {/* 필터 + 전체 그리드 */}
+        <section style={{ display: 'grid', gap: 16 }}>
+          <FilterPanel
+            selectedDepartment={selectedDepartment}
+            onDepartmentChange={handleDepartmentChange}
+            selectedActivityTypes={selectedActivityTypes}
+            onActivityTypeToggle={handleActivityTypeToggle}
+            selectedCampus={selectedCampus}
+            onCampusChange={handleCampusChange}
+            showExpired={showExpired}
+            onShowExpiredChange={setShowExpired}
+            sort={sortParam}
+            onSortChange={handleSortChange}
+            resultCount={filteredPostCount}
+          />
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              marginTop: 4,
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>
+              전체 공지{' '}
+              <span style={{ color: 'var(--text-dim)', fontWeight: 600, fontSize: 16 }}>
+                · {filteredPostCount}건
+              </span>
+              {searchQuery && (
+                <span
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 13,
+                    color: 'var(--text-dim)',
+                    fontWeight: 500,
+                  }}
                 >
-                  최신순
-                </button>
-                <button
-                  onClick={() => handleSortChange('deadline')}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    sortParam === 'deadline'
-                      ? 'bg-white dark:bg-slate-700 shadow-sm text-[#033885] dark:text-blue-400'
-                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300'
-                  }`}
-                >
-                  마감임박
-                </button>
-              </div>
-            </div>
+                  &quot;{searchQuery}&quot; 검색 결과
+                </span>
+              )}
+            </h2>
+          </div>
 
-            <PostList
-              posts={searchedPosts}
-              isLoading={isLoading}
-              showExpired={showExpired}
-              userId={user?.id}
-              onBookmarkChange={handleBookmarkChange}
-            />
-          </section>
-        </div>
+          <PostList
+            posts={searchedPosts}
+            isLoading={isLoading}
+            showExpired={showExpired}
+            userId={user?.id}
+            onBookmarkChange={handleBookmarkChange}
+          />
+        </section>
       </main>
 
-      {/* 푸터 */}
-      <footer className="mt-16 py-8 border-t border-slate-200 dark:border-slate-700">
-        <div className="max-w-6xl mx-auto px-4 text-center text-sm text-slate-500 dark:text-slate-400">
-          <p>© 2024 KNUPick. 공주대학교 학생을 위한 서비스입니다.</p>
-          <p className="mt-1">
+      <footer
+        style={{
+          marginTop: 32,
+          padding: '32px 24px',
+          borderTop: '1px solid var(--border-soft)',
+          background: 'var(--surface)',
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 1180,
+            margin: '0 auto',
+            textAlign: 'center',
+            fontSize: 13,
+            color: 'var(--text-dim)',
+          }}
+        >
+          <p style={{ margin: 0 }}>© 2024 KNUPick. 공주대학교 학생을 위한 서비스입니다.</p>
+          <p style={{ margin: '6px 0 0' }}>
             문의:{' '}
-            <a href="mailto:support@knupick.kr" className="text-[#033885] hover:underline">
+            <a
+              href="mailto:support@knupick.kr"
+              style={{ color: 'var(--accent)', textDecoration: 'none' }}
+            >
               support@knupick.kr
             </a>
           </p>
         </div>
       </footer>
-
     </div>
   );
 }
 
-// 로딩 폴백 컴포넌트
 function HomeLoading() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[#033885]"></div>
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg)',
+      }}
+    >
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          border: '2.5px solid var(--accent-soft)',
+          borderTopColor: 'var(--accent)',
+          borderRadius: '50%',
+          animation: 'spin 0.8s linear infinite',
+        }}
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
 
-// 메인 페이지 - Suspense로 감싸기
 export default function Home() {
   return (
     <Suspense fallback={<HomeLoading />}>
