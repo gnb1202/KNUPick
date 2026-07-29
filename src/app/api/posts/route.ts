@@ -60,7 +60,10 @@ export async function GET(request: NextRequest) {
       // 2. 메인 쿼리 - 관련 게시글 또는 공통 관심사 활동유형
       let query = supabase
         .from('posts')
-        .select('*', { count: 'exact' })
+        .select(
+          'id, title, content, original_url, posted_date, deadline, activity_types, keywords, created_at, updated_at, campus, summary, event_start_date, event_end_date',
+          { count: 'exact' }
+        )
         .order(orderConfig.column, { ascending: orderConfig.ascending, nullsFirst: orderConfig.nullsFirst });
 
       // 학과 관련 게시글 OR 공통 관심사 활동유형
@@ -115,7 +118,10 @@ export async function GET(request: NextRequest) {
       // 학과 필터 없음 - 완전 DB 쿼리
       let query = supabase
         .from('posts')
-        .select('*', { count: 'exact' })
+        .select(
+          'id, title, content, original_url, posted_date, deadline, activity_types, keywords, created_at, updated_at, campus, summary, event_start_date, event_end_date',
+          { count: 'exact' }
+        )
         .order(orderConfig.column, { ascending: orderConfig.ascending, nullsFirst: orderConfig.nullsFirst });
 
       // 마감임박순일 때: 마감일이 오늘 이후인 게시글만
