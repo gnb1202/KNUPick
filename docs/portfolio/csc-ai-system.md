@@ -23,11 +23,11 @@
 | 공고 요구사항 | KNUPick에서의 경험 | 위치 |
 |--------------|-------------------|------|
 | **사내 AI 시스템 개발** | LLM 기반 공지 분석·검색·추천 시스템 설계·구축·운영 | 전체 |
-| **업무 자동화 (RPA)** | 학교 게시판 자동 크롤링 → LLM 분석 → DB 저장 (Vercel cron 매일 실행) | `src/lib/crawler.ts`, `src/app/api/crawl/route.ts` |
+| **업무 자동화 (RPA)** | 학교 게시판 크롤링 → LLM 분석 → DB 저장 파이프라인 (현재는 수동 트리거. 스케줄러 미구현 — §5.1) | `src/lib/crawler.ts`, `src/app/api/crawl/route.ts` |
 | **OCR** | 이미지 공지(포스터)를 CLOVA OCR + LLM 분석 파이프라인으로 텍스트화 | `src/lib/llm.ts:analyzeImagePostWithLLM` |
 | **자연어 처리 (NLP)** | 게시글에서 요약·활동유형 8종 분류·마감일·키워드 자동 추출 | `src/lib/llm.ts:analyzePostWithLLM` |
 | **사내 챗봇 (LLM API 기반)** | Agentic RAG 챗봇 — GPT-4o function calling으로 query 의도 추출 → DB 빌더 검색 + 임베딩 fallback → 자연어 답변 (SSE 스트리밍) | `src/app/api/chat/route.ts`, `src/lib/post-search.ts` |
-| **OpenAI / LLM API 통합** | OpenAI GPT-4o (function calling), Ollama (Gemma 3 8B, bge-m3 임베딩) 둘 다 production 통합 | `src/lib/openai.ts`, `src/lib/embeddings.ts` |
+| **OpenAI / LLM API 통합** | production은 OpenAI (gpt-4o 챗봇 / gpt-4o-mini 분석 / text-embedding-3-small). Ollama(Gemma, bge-m3)는 로컬 개발 환경에서 사용하며, 공급자 플래그로 전환 가능 | `src/lib/openai.ts`, `src/lib/embeddings.ts`, `src/lib/llm.ts` |
 | **AI 도입 효율 평가 + KPI** | 임베딩 모델 3종 비교 정량 측정, prompt 튜닝 전후 정확도 측정 (94→100%) | §3.2, §3.3 |
 | **이상 진단 / 모델 모니터링** | URL dedupe 버그 발견 (production 매일 0건 inserted), timezone 버그 발견·수정 | §3.4, §3.5 |
 | **AI 운영 문서 / 가이드라인** | ADR (Architecture Decision Record) 작성 — 의사결정 근거 + 측정 + 거절한 대안 보존 | `docs/adr/001-chatbot-search-architecture.md` |
@@ -72,19 +72,32 @@
 
 ### 3.2 임베딩 모델 비교 (정량 평가)
 
-103개 게시물 + 동일 4개 query로 3개 모델 측정:
+**1차 측정 (2026-05)** — 103개 게시물 + 동일 4개 query:
 
-| 모델 | 차원 | similarity 분포 | "통일 모의 국무회의" 매칭 |
-|------|-----|---------------|--------------------------|
-| OpenAI `text-embedding-3-small` | 1536 | 0.15~0.22 | ❌ |
-| OpenAI `text-embedding-3-large` | 1536 | 0.15~0.22 | ❌ |
-| **bge-m3** (Ollama 로컬) | 1024 | 0.30~0.42 | ❌ |
+| 모델 | 차원 | similarity 분포 |
+|------|-----|---------------|
+| OpenAI `text-embedding-3-small` | 1536 (기본) | 0.15~0.22 |
+| OpenAI `text-embedding-3-large` | 1536 | 0.15~0.22 |
+| **bge-m3** (Ollama 로컬) | 1024 | 0.30~0.42 |
 
-**의사결정**:
-- bge-m3 채택 (한국어 분포가 가장 넓음 + 비용 0)
-- 그러나 단독으론 부족 → agentic RAG의 보조 검색으로 사용
+당시 결정은 bge-m3 채택 (분포가 넓고 비용 0). 임계값은 0.30으로 설정.
 
-**transferable insight**: 임베딩 모델 변경은 일반 MTEB 벤치마크와 도메인 데이터(짧은 한국어 query)에서 다르게 작동. 모델 비교는 **본인 도메인 데이터로 직접 측정** 필요.
+**2차 측정 (2026-07)** — 로컬 GPU를 쓸 수 없게 되어 재평가. 이때 1차 측정의 방법론 결함을 발견했다.
+
+- `posts.embedding`이 `vector(1024)`인데 1차에서는 OpenAI를 1536차원 그대로 비교했다. `dimensions` 파라미터로 1024로 축소하면(MRL) 스키마 변경 없이 쓸 수 있다는 것을 놓쳤다.
+- 더 근본적으로, **모델 간 similarity 절대값을 비교한 것 자체가 잘못**이었다. 값의 크기는 모델마다 스케일이 다를 뿐, 검색 품질을 결정하는 건 **관련 질의와 무관 질의의 분리 폭**이다.
+
+`scripts/measure-similarity.ts`로 신호군/대조군을 나눠 다시 측정:
+
+| 모델 | 관련 질의 top1 | 무관 질의 top1 최대 | 분리 폭 |
+|------|--------------|------------------|--------|
+| `text-embedding-3-small` (dimensions=1024) | 0.4213 ~ 0.5824 | 0.3025 | **0.1188** |
+
+**의사결정**: OpenAI로 전환, 임계값 0.30 → **0.36** (두 분포의 중간).
+
+기존 0.30을 그대로 뒀다면 무관 질의("내일 날씨 어때")의 최상위 결과가 0.3025로 통과해, 챗봇이 엉뚱한 공지를 근거로 답했을 것이다. **임계값은 모델에 종속적이므로 모델 교체 시 반드시 재측정해야 한다**는 것을 수치로 확인했다.
+
+**transferable insight**: 두 가지다. ① 벤치마크가 아니라 본인 도메인 데이터로 측정할 것. ② 그런데 "측정했다"는 것만으로 안전하지 않다 — 1차 측정은 실제로 수행됐지만 비교 축이 틀려서 잘못된 결론을 냈다. **무엇을 재는지가 재는 행위보다 중요하다.**
 
 ---
 
@@ -115,7 +128,7 @@
 - 크롤러 list 페이지가 반환하는 URL은 단순 형식
 - `existingUrls` 비교 시 mismatch → 모든 게시물이 "신규"로 분류
 
-**영향**: Vercel cron이 매일 9시에 동일 패턴으로 도는데, **production이 첫 실행 후 매일 0건 inserted로 동작 중일 가능성** (initial commit부터의 잠재 버그).
+**영향**: 크롤을 돌릴 때마다 DB가 비어있지 않은 한 항상 0건 inserted로 끝난다. initial commit부터 있던 버그이며, 스케줄러를 붙였다면 매 회차가 무의미하게 돌았을 것이다.
 
 **수정**:
 - `normalizeOriginalUrl()` 헬퍼 추가 (`?layout=unknown` 제거)
@@ -154,11 +167,14 @@
 **미묘한 trade-off**:
 - Eager validation = 12-factor app 원칙. 다만 production에서 의미 없는 env(예: Ollama)를 강제하면 잘못.
 - Lazy validation = production 친화적이지만 fail-late.
-- **채택**: Conditional schema (`LLM_ENABLED && !OLLAMA_MODEL → throw`) + default를 production 친화적 값으로. 두 트레이드오프 모두 해결.
+- **채택**: Conditional schema + default를 production 친화적 값으로. 두 트레이드오프 모두 해결.
+  현재 조건은 `LLM_ENABLED && LLM_PROVIDER === 'ollama' && !OLLAMA_MODEL → throw` — 공급자를 도입하면서, Ollama 경로를 실제로 쓸 때만 Ollama 설정을 요구하도록 좁혔다.
 
 **위치**: `src/env.ts`.
 
-**transferable insight**: "best practice"는 도그마가 아니라 도메인 컨텍스트에 맞는 균형점.
+**실제로 값을 한 사례**: OpenAI 전환분을 배포할 때 Vercel 빌드가 실패했다. `OPENAI_API_KEY`가 Preview/Production 스코프에 등록돼 있지 않았고, 검증이 빌드 시점에 이를 잡았다. 검증이 없었다면 배포는 성공하고 **런타임에 챗봇과 임베딩만 조용히 실패**했을 것이다 — 실제로 그 전까지 production 시맨틱 검색이 그런 상태였다(§3.8).
+
+**transferable insight**: "best practice"는 도그마가 아니라 도메인 컨텍스트에 맞는 균형점. 다만 fail-fast는 불편한 만큼 값을 한다 — 조용한 실패보다 시끄러운 실패가 낫다.
 
 ---
 
@@ -171,6 +187,36 @@
 4. **service_role bypass**: 서버 라우트만 우회 (의도)
 
 **산출물**: `supabase/schema.sql` — 단일 파일로 모든 보안 계층 멱등 적용 가능.
+
+---
+
+### 3.8 Production 무음 실패 — 임베딩 검색이 에러 없이 0건
+
+**증상**: production 챗봇이 "관련 공지를 찾지 못했어요"만 반환. **에러 로그는 하나도 없음.**
+
+**진단**: `generateEmbedding()`이 Ollama `/api/embed`를 호출하는데, `OLLAMA_HOST` 기본값이 `http://localhost:11434`다. Vercel 서버리스에는 Ollama가 없으니 fetch가 실패하고, `catch`가 이를 삼켜 `null`을 반환한다. 호출부는 `if (!emb) return []` — 즉 **실패가 "에러"가 아니라 "결과 0건"으로 표현**되어 모니터링에 걸리지 않았다.
+
+**핵심 문제**: 로컬에서는 Ollama가 떠 있어 완벽히 동작했다. 환경 차이가 기능을 조용히 무력화했고, 로컬 테스트로는 절대 발견할 수 없었다.
+
+**수정**: 임베딩 공급자를 OpenAI로 전환 (`EMBEDDING_PROVIDER` 기본값 `openai`). `posts.embedding`이 `vector(1024)`이므로 `text-embedding-3-small`을 `dimensions=1024`로 축소해 **DB 마이그레이션 없이** 교체.
+
+**검증**: production에서 "이번 여름에 신청할 수 있는 장학금" → 5건, similarity 0.4974~0.5653.
+
+**transferable insight**: `catch` 안에서 fallback 값을 반환하는 코드는 실패를 정상 응답으로 위장한다. 빈 결과가 "데이터가 없음"인지 "조회에 실패함"인지 구분되지 않으면, 장애는 사용자만 알고 개발자는 모른다.
+
+---
+
+### 3.9 크롤러 페이지 범위 — 두 달치 데이터 누락
+
+**증상**: DB의 게시물 날짜가 4월 말과 7월에만 몰려 있고 5~6월이 비어 있음.
+
+**진단**: `crawlAllPosts(10)`으로 페이지 수가 하드코딩돼 있었다. 로그를 보니 10페이지 시점에 `hasMore: true`였는데도 상한에 걸려 중단했다. 크롤을 오래 안 돌리면 그 사이 게시물이 10페이지 밖으로 밀려나 영구히 누락된다.
+
+부수적으로 `hasMore` 계산도 틀려 있었다 — `page * 10 < totalPosts`로 페이지당 10건을 가정했지만 실제 목록은 12건씩 내려온다.
+
+**수정**: `?pages=N` 파라미터로 조정 가능하게 변경(상한 50), `hasMore`는 실제 페이지 크기 기준으로 계산.
+
+**transferable insight**: 상한값은 "정상 동작"과 "조용한 데이터 손실"의 경계다. 상한에 도달했는데 더 가져올 게 남아 있다면 그건 최소한 로그로 남아야 한다.
 
 ---
 
@@ -189,14 +235,16 @@
 
 ### 4.3 비용 관리
 
-- 임베딩은 로컬 Ollama (비용 0). production에서 Ollama 호출 못 하므로 vercel cron은 키워드 폴백
-- 챗봇 답변만 OpenAI GPT-4o (요청당 ~$0.001)
-- Rate limit RPC로 IP당 분당 20회 제한 (남용 차단)
+- 배치 작업은 실측 기반으로 비용을 먼저 뽑고 실행한다. 스크립트가 샘플 N건을 실제 호출해 건당 토큰을 재고 전체에 외삽한 뒤, `--execute` 없이는 DB에 쓰지 않는다 (`scripts/reembed-posts.ts`, `scripts/backfill-analysis.ts`)
+- 실적: 게시물 101건 요약·분류 백필 **$0.04**, 108건 재임베딩 **$0.0003**
+- 챗봇 답변 gpt-4o (요청당 ~$0.001), 게시물 분석은 gpt-4o-mini로 분리 — 건수가 많고 정형 출력이라 저렴한 모델로 충분
+- Rate limit RPC로 IP당 분당 제한 (남용 차단)
 
 ### 4.4 Feature Flag
 
-- `CHAT_AGENTIC_RAG=true|false` env 토글로 vanilla RAG vs agentic RAG 즉시 롤백 가능
-- Vanilla 코드는 `handleVanillaRAG` 함수로 보존
+- `CHAT_AGENTIC_RAG=true|false` env 토글로 vanilla RAG vs agentic RAG 즉시 롤백 가능. Vanilla 코드는 `handleVanillaRAG` 함수로 보존
+- `EMBEDDING_PROVIDER=openai|ollama`, `LLM_PROVIDER=openai|ollama` — 로컬 GPU 복구 시 env 한 줄로 되돌릴 수 있도록 Ollama 경로 코드를 삭제하지 않고 유지. 프롬프트는 두 공급자가 공유
+- 단 임베딩 공급자 전환은 벡터 공간이 달라 **전체 재임베딩이 필수**다. 이를 잊지 않도록 `posts.embedding_model` 컬럼에 벡터 출처를 기록하고, 재임베딩 스크립트가 이 값으로 대상과 재개 지점을 판단한다
 
 ---
 
@@ -207,6 +255,7 @@
 - **Python / PyTorch 직접 사용 경험 X**: KNUPick은 TypeScript 스택. 다만 LLM API 통합·prompt 엔지니어링·시스템 운영 경험은 언어 무관 transferable. 입사 시 Python 학습은 빠르게 가능하다고 판단.
 - **ML 모델 fine-tuning 경험 X**: GPT-4o, Gemma, bge-m3는 모두 사전학습 모델 활용. Fine-tuning은 학습 의지 있음.
 - **단독 운영**: 팀 협업·코드 리뷰 경험 limited. 다만 의사결정을 ADR로 명시적으로 남기는 습관은 팀 환경에서도 직접 활용 가능.
+- **크롤링 스케줄러 미구현**: `vercel.json`에 cron이 없어 현재는 수동 트리거로 동작한다. 파이프라인 자체는 완성돼 있고 인증(`CRON_SECRET`)과 실행 시간 상한(`maxDuration`)도 준비돼 있으나, 스케줄 등록은 하지 않은 상태다. 붙이려면 `LLM_ENABLED`/`LLM_PROVIDER`를 배포 환경에도 등록해야 신규 게시물에 요약이 생성된다.
 
 ### 5.2 공고 요구사항에 정확히 부합하는 부분
 

@@ -44,7 +44,7 @@
 
 | 문제 | 해결 |
 |------|------|
-| 매일 학교 사이트를 직접 들어가야 함 | Vercel Cron이 주기적으로 학생소식란을 크롤링하여 DB에 저장 |
+| 매일 학교 사이트를 직접 들어가야 함 | 크롤 API(`POST /api/crawl`)가 학생소식란을 수집해 DB에 저장 (현재 수동 트리거 — 스케줄러 미등록) |
 | 공주대 게시판은 비표준 응답을 반환 (HTTP 라이브러리로는 파싱 불가) | **Puppeteer + @sparticuz/chromium** 헤드리스 브라우저로 실제 렌더링 후 HTML 추출 |
 | 서버리스 환경에서 Chrome 바이너리 용량 한계 | 로컬에선 `puppeteer`, Vercel에선 `@sparticuz/chromium` 으로 분기 (`src/lib/crawler.ts`) |
 | 게시판 페이지네이션·중복 처리 | `original_url` 기반 upsert + `crawl_logs` 테이블로 멱등성 보장 |
@@ -53,7 +53,7 @@
 
 ### ② LLM 기반 자동 분석 — “읽지 않아도 핵심을 안다”
 
-게시글 한 건당 한 번의 Ollama 호출(**Gemma 3 8B** — `gemma4:e4b-it-q4_K_M`, reasoning 모드 비활성화)로 **요약·활동유형·마감일·행사일·키워드**를 동시에 추출합니다 (`src/lib/llm.ts`의 `analyzePostWithLLM`).
+게시글 한 건당 한 번의 LLM 호출(기본 **gpt-4o-mini**, `LLM_PROVIDER=ollama` 시 Gemma 3 8B)로 **요약·활동유형·마감일·행사일·키워드**를 동시에 추출합니다 (`src/lib/llm.ts`의 `analyzePostWithLLM`).
 
 | 추출 항목 | 해결한 사용자 문제 |
 |-----------|------------------|
@@ -78,7 +78,7 @@
 포스터 한 장만 올라온 공지를 OCR + LLM으로 텍스트 공지처럼 다룹니다 (`analyzeImagePostWithLLM`).
 
 ```
-이미지 공지 → CLOVA OCR (텍스트 추출) → Gemma (구조화 분석) → DB 저장
+이미지 공지 → CLOVA OCR (텍스트 추출) → LLM (구조화 분석) → DB 저장
 ```
 
 이로써 이미지만 있는 공지도 **요약 / 활동유형 / 마감일 / 키워드**가 모두 채워져, 검색·필터·캘린더에 정상 노출됩니다.
@@ -120,6 +120,8 @@
 
 각각 다른 검색 전략이 필요했습니다. 이미 LLM이 분석해 채워둔 구조화 메타데이터(`activity_types[]`, `keywords[]`, `deadline`, `campus`)를 활용하는 게 자연스러워 **single function call 패턴의 agentic RAG**로 전환했습니다.
 
+> 위 0.15~0.42 수치는 1차 측정(2026-05) 값입니다. 이후 로컬 GPU를 쓸 수 없게 되어 재측정한 결과, 당시 비교 방법에 결함이 있었음을 확인했습니다 — 모델 간 similarity **절대값**을 비교한 것이 문제였고, 실제로 중요한 건 관련/무관 질의의 **분리 폭**이었습니다. 현재는 `text-embedding-3-small`(`dimensions=1024`) 기준 관련 질의 0.42~0.58 / 무관 질의 최대 0.30으로 임계값 0.36을 사용합니다. 자세한 내용은 `docs/portfolio/csc-ai-system.md` §3.2.
+
 #### 흐름
 
 ```
@@ -128,7 +130,7 @@
    │   reasoning + activity_types[] + deadline_from/to + campus + semantic_query 추출
    ↓ ② src/lib/post-search.ts
    │   • 필터 명시: Supabase 빌더 (overlaps/in/gte/lte)
-   │   • 시맨틱 명시: bge-m3 임베딩 → pgvector match_posts RPC
+   │   • 시맨틱 명시: OpenAI 임베딩 → pgvector match_posts RPC
    │   • 둘 다: 빌더로 좁히고 (보조) 임베딩 정렬
    ↓ 'posts' SSE event 즉시 송출 (카드 먼저 표시)
    ↓ ③ GPT-4o 두 번째 호출 (stream: true)
@@ -149,7 +151,7 @@ UI 카드와 답변이 항상 일관되도록 — 카드는 검색 결과, 답�
 #### 디테일
 
 - **Feature flag**: `CHAT_AGENTIC_RAG=true` 시 agentic, 아니면 vanilla RAG로 fallback (롤백 안전)
-- **임베딩**: 로컬 Ollama `bge-m3` 1024차원 (한국어 강함). `posts.embedding` 컬럼 + HNSW 코사인 인덱스
+- **임베딩**: OpenAI `text-embedding-3-small`을 `dimensions=1024`로 축소. `posts.embedding` 컬럼(`vector(1024)`) + HNSW 코사인 인덱스. 유사도 임계값 0.36은 관련/무관 질의군을 실측해 결정 (`scripts/measure-similarity.ts`)
 - **할루시네이션 방지**: 시스템 프롬프트에 "tool 결과만 근거로 답변, 추측 금지" 명시 + `[텍스트](url)` 같은 마크다운 링크 금지
 - **SSE 스트리밍**: 답변 생성과 동시에 관련 공지 카드를 먼저 표시 → 체감 응답 속도 개선
 - **Rate limit**: `rate_limits` 테이블 + `increment_rate_limit` RPC로 IP당 분당 20회 제한 (서버리스 인스턴스 간 공유)
@@ -169,12 +171,12 @@ UI 카드와 답변이 항상 일관되도록 — 카드는 검색 결과, 답�
 ## 주요 기능 요약
 
 - **맞춤 피드**: 학과·캠퍼스·관심 활동유형 자동 필터링
-- **자동 크롤링**: 공주대학교 학생소식란 주기 수집 (Puppeteer)
-- **LLM 자동 분석**: 한 번의 호출로 요약·활동유형·마감일·행사일·키워드 추출 (Ollama Gemma 3 8B)
-- **이미지 공지 분석**: CLOVA OCR → Gemma 파이프라인으로 포스터 공지도 검색·필터 가능
+- **크롤링**: 공주대학교 학생소식란 수집 (Puppeteer). `?pages=N`으로 수집 범위 조절
+- **LLM 자동 분석**: 한 번의 호출로 요약·활동유형·마감일·행사일·키워드 추출 (`LLM_PROVIDER`로 OpenAI ↔ Ollama 전환)
+- **이미지 공지 분석**: CLOVA OCR → LLM 파이프라인으로 포스터 공지도 검색·필터 가능
 - **8개 활동유형 자동 분류**: 🏆공모전 · 🌍대외활동 · 📢서포터즈 · 💼인턴/채용 · 🤝봉사 · 📚교육 · 💰장학금 · 📌기타
 - **개인화 추천**: 북마크·조회 이력 기반 키워드 학습 + 사용자 정의 제외 키워드
-- **Agentic RAG 챗봇**: GPT-4o function calling으로 query 의도 추출 → 빌더 검색 + bge-m3 임베딩 보조 + 스트리밍 답변
+- **Agentic RAG 챗봇**: GPT-4o function calling으로 query 의도 추출 → 빌더 검색 + 임베딩 보조 + 스트리밍 답변
 - **한글 초성 검색**: "ㅈㅎㄱ" → "장학금"
 - **마감 캘린더**: 월별 마감일·행사 시작/종료일 시각화
 - **마감 임박 알림**: 북마크 공지가 D-N일 이내일 때 자동 노출
@@ -188,8 +190,8 @@ UI 카드와 답변이 항상 일관되도록 — 카드는 검색 결과, 답�
 - **Backend**: Next.js API Routes (Node.js runtime)
 - **Database**: Supabase (PostgreSQL + pgvector 확장)
 - **Auth**: Supabase Auth (RLS 정책으로 행 단위 보호)
-- **LLM (분석)**: Ollama + Gemma 3 8B (`gemma4:e4b-it-q4_K_M`) — 요약·분류·날짜 추출, reasoning 모드 비활성
-- **임베딩 (RAG)**: Ollama + bge-m3 (1024d, 한국어 강함) — pgvector HNSW 코사인 인덱스
+- **LLM (분석)**: OpenAI `gpt-4o-mini` — 요약·분류·날짜 추출. `LLM_PROVIDER=ollama`로 로컬 Gemma 3 8B(`gemma4:e4b-it-q4_K_M`) 전환 가능
+- **임베딩 (RAG)**: OpenAI `text-embedding-3-small` (`dimensions=1024`) — pgvector HNSW 코사인 인덱스. `EMBEDDING_PROVIDER=ollama`로 bge-m3 전환 가능 (단 전환 시 전체 재임베딩 필요)
 - **OCR**: NAVER CLOVA OCR — 이미지 공지 텍스트화
 - **LLM (챗봇 답변)**: OpenAI GPT-4o + function calling (agentic RAG)
 - **Crawling**: Puppeteer Core, @sparticuz/chromium (Vercel 서버리스), Cheerio
@@ -209,9 +211,9 @@ UI 카드와 답변이 항상 일관되도록 — 카드는 검색 결과, 답�
      │  ① crawlAllPosts (Puppeteer + Cheerio) — 학생소식란 N페이지
      │  ② normalizeOriginalUrl로 dedupe (?layout=unknown 정규화)
      │  ③ 신규 게시물만 detail crawl + 2차 dedupe
-     │  ④ analyzePostWithLLM (Gemma) — 요약/유형/날짜/키워드
-     │     └─ 이미지 공지: CLOVA OCR → Gemma
-     │  ⑤ generateEmbedding (bge-m3) — 1024d 임베딩
+     │  ④ analyzePostWithLLM (gpt-4o-mini) — 요약/유형/날짜/키워드
+     │     └─ 이미지 공지: CLOVA OCR → LLM
+     │  ⑤ generateEmbedding (text-embedding-3-small) — 1024d 임베딩
      │  ⑥ Supabase posts INSERT + 학과 매핑
      ▼
 [프런트엔드]
@@ -237,7 +239,7 @@ src/
 │   │   ├── crawl/route.ts             # 크롤링 + LLM 분석 트리거
 │   │   ├── crawl/reanalyze/route.ts   # 기존 게시물 LLM 재분석
 │   │   ├── chat/route.ts              # Agentic RAG 챗봇 (function calling + SSE)
-│   │   ├── embeddings/backfill/route.ts # bge-m3 임베딩 일괄 생성/재생성
+│   │   ├── embeddings/backfill/route.ts # 임베딩 일괄 생성/재생성
 │   │   ├── recommendations/route.ts   # 개인화 추천 점수 계산
 │   │   ├── bookmarks/[postId]/route.ts # 북마크 추가/삭제/조회
 │   │   ├── reminders/route.ts         # 마감 임박 알림
@@ -262,9 +264,9 @@ src/
 │   └── ThemeContext.tsx               # 다크모드
 ├── lib/
 │   ├── crawler.ts                     # Puppeteer 크롤러 + URL 정규화 헬퍼
-│   ├── llm.ts                         # Ollama (Gemma) + CLOVA OCR
+│   ├── llm.ts                         # LLM 분석 (OpenAI/Ollama) + CLOVA OCR
 │   ├── openai.ts                      # OpenAI 클라이언트 (GPT-4o)
-│   ├── embeddings.ts                  # bge-m3 임베딩 (Ollama, 1024d)
+│   ├── embeddings.ts                  # 임베딩 (OpenAI/Ollama 전환, 1024d)
 │   ├── post-search.ts                 # Agentic RAG 검색 (tool 정의 + 빌더 + 임베딩 fallback)
 │   ├── rate-limit.ts                  # 분산 환경 rate limit RPC 클라이언트
 │   ├── search.ts                      # 한글 초성 검색
@@ -347,7 +349,7 @@ curl -X POST http://localhost:3000/api/crawl \
 | activity_types | int[] | 1~8 |
 | keywords | text[] | 학과 매칭용 |
 | campus | text | common/kongju/cheonan/yesan |
-| embedding | vector(1024) | bge-m3 (Ollama, 1024d, HNSW 코사인 인덱스) |
+| embedding | vector(1024) | text-embedding-3-small (dimensions=1024, HNSW 코사인 인덱스) |
 | created_at / updated_at | timestamptz | |
 
 ### profiles
@@ -374,7 +376,7 @@ curl -X POST http://localhost:3000/api/crawl \
 
 ### Supabase RPC
 - `match_posts(query_embedding jsonb, match_threshold float, match_count int, include_expired bool)`
-  → pgvector 코사인 유사도 기반 상위 N건 반환 (챗봇 시맨틱 검색용, 1024d bge-m3)
+  → pgvector 코사인 유사도 기반 상위 N건 반환 (챗봇 시맨틱 검색용, 1024d)
 - `handle_new_user()` — auth.users INSERT 트리거로 profiles 행 자동 생성 (race condition 방지)
 - `increment_rate_limit(p_key, p_limit, p_window_ms)` — atomic increment + 한도 비교 (분산 환경에서 인스턴스 간 카운터 공유)
 
@@ -423,20 +425,27 @@ npm run dev:restart  # 포트 점유 노드 정리 후 재시작
 | `NEXT_PUBLIC_SUPABASE_URL` | ✅ | — | Supabase 프로젝트 URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | — | Supabase anon key (RLS로 보호) |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | — | 서버 전용 service role key |
-| `OPENAI_API_KEY` | ✅ | — | 챗봇 답변 생성 (GPT-4o) |
+| `OPENAI_API_KEY` | ✅ | — | 챗봇 답변(gpt-4o) · 게시물 분석(gpt-4o-mini) · 임베딩 |
 | `CRON_SECRET` | ✅ | — | `/api/crawl` Bearer 토큰 |
 | `OLLAMA_HOST` | 선택 | `http://localhost:11434` | Ollama 서버 |
-| `OLLAMA_MODEL` | 조건부 | — | LLM 분석 모델. `LLM_ENABLED=true`일 때 필수 (예: `gemma4:e4b-it-q4_K_M`) |
+| `OLLAMA_MODEL` | 조건부 | — | `LLM_ENABLED=true` **이고** `LLM_PROVIDER=ollama`일 때만 필수 (예: `gemma4:e4b-it-q4_K_M`) |
 | `OLLAMA_EMBED_MODEL` | 선택 | `bge-m3` | 임베딩 모델 (1024d) |
-| `LLM_ENABLED` | 선택 | `false` | `true` 시 Ollama 텍스트 분석 활성. 로컬 dev에서만 권장 (Vercel은 default false로 자동 비활성) |
+| `LLM_ENABLED` | 선택 | `false` | 분석 마스터 스위치. `false`면 `categorizer.ts` 키워드 폴백으로 동작 |
+| `LLM_PROVIDER` | 선택 | `openai` | 분석 공급자. `ollama`로 전환 시 로컬 GPU 필요 |
+| `EMBEDDING_PROVIDER` | 선택 | `openai` | 임베딩 공급자. 전환 시 **전체 재임베딩 필수** (벡터 공간이 다름) |
+| `OPENAI_LLM_MODEL` | 선택 | `gpt-4o-mini` | 게시물 분석 모델 |
+| `OPENAI_EMBED_MODEL` | 선택 | `text-embedding-3-small` | 임베딩 모델 (`dimensions=1024`로 축소) |
 | `CHAT_AGENTIC_RAG` | 선택 | `false` | `true` 시 챗봇이 GPT-4o function calling 기반 agentic RAG로 동작 |
 | `CLOVA_OCR_URL` | 선택 | — | 이미지 공지 OCR — 미설정 시 이미지 공지 스킵 |
 | `CLOVA_OCR_SECRET` | 선택 | — | CLOVA OCR API key |
 | `SKIP_ENV_VALIDATION` | 선택 | `false` | CI/Docker 빌드 시점에 검증 우회용 |
 
-> **Vercel 배포**: 위 ✅ 5개만 설정하면 자동으로 `LLM_ENABLED=false`(default) → Ollama 호출 차단 + 키워드 폴백으로 작동. 추가 변수 불필요.
+> **Vercel 배포**: 위 ✅ 5개가 필수입니다. 하나라도 없으면 `env.ts` 검증이 **빌드 시점에** 실패합니다.
+> 임베딩·챗봇은 기본값(`EMBEDDING_PROVIDER=openai`)으로 바로 동작합니다.
+> 배포 환경에서 크롤링까지 돌리려면 `LLM_ENABLED=true` + `LLM_PROVIDER=openai`를 추가하세요 (없으면 신규 게시물에 요약이 생성되지 않습니다).
+> `OLLAMA_*`는 배포에 넣지 마세요 — 서버리스에는 Ollama가 없습니다.
 >
-> **로컬 dev**: `.env.local.example`을 참고해 `LLM_ENABLED=true` + `OLLAMA_MODEL=...` 명시 시 LLM 분석/임베딩 활성.
+> **로컬 dev**: `.env.local.example` 참고. GPU가 있으면 `LLM_PROVIDER=ollama` + `OLLAMA_MODEL=...`로 전환할 수 있습니다.
 
 ---
 
