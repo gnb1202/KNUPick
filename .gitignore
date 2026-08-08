@@ -68,6 +68,15 @@ backups/
 # oh-my-claudecode 에이전트 세션 상태
 .omc/
 
+# 개인 문서 — 취업 지원용 포트폴리오, 이력서, 자기소개서 등
+# 특정 회사를 겨냥해 쓴 문서라 공개 저장소에 둘 성격이 아니다.
+# 프로젝트 설명은 README.md와 docs/adr/ 로 충분하다.
+docs/portfolio/
+resume*
+이력서*
+자기소개서*
+*.resume.md
+
 # 개발 중 저장한 화면 캡처 (저장소 루트 한정 — public/ 이미지는 유지)
 /*.png
 /*.jpg
