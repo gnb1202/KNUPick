@@ -23,8 +23,8 @@
 - 학생들은 **대상 / 기간 / 신청방법**이라는 3가지를 알고 싶을 뿐인데, 매번 수백 자의 본문을 읽어야 했습니다.
 
 ### 4. 이미지로만 올라온 공지는 검색이 안 된다
-- 포스터 한 장만 첨부된 공지가 전체의 약 15~20%를 차지합니다.
-- 텍스트 본문이 없으니 **검색·필터·요약 모두 불가능**한 “블랙박스 공지”가 되어 묻혀버립니다.
+- 수집한 213건 중 본문이 완전히 비어 있는 포스터 전용 공지가 5건(2.3%), 본문이 100자 미만이라 사실상 정보가 이미지에 있는 공지까지 넓히면 15건(7.0%)입니다.
+- 비율 자체는 크지 않지만, 텍스트 본문이 없으면 **검색·필터·요약이 모두 불가능**한 “블랙박스 공지”가 되어 완전히 묻혀버립니다. 놓치면 손해인 공모전·장학금 포스터가 여기 섞여 있어 무시할 수 없었습니다.
 
 ### 5. 마감일을 캘린더에서 한눈에 볼 수 없다
 - 학교 사이트는 게시판 형식이라 "이번 주에 마감되는 공지"를 시각적으로 파악할 수 없습니다.
@@ -66,7 +66,7 @@
 **프롬프트 엔지니어링 디테일**
 
 - XML 태그(`<TASK>`, `<RULES>`, `<EXAMPLES>`) 기반 구조화 프롬프트로 **출력 일관성 확보**
-- Few-shot 예시 7건 포함 — 특히 까다로운 케이스를 의도적으로 학습:
+- Few-shot 예시 8건 포함 — 특히 까다로운 케이스를 의도적으로 학습:
   - "12. 19. ~ 12. 31." 같은 **기간 공지는 마감일로 처리** (강의평가·이의신청)
   - "기간 내 신청하시기 바랍니다"만 있고 날짜 없으면 **마감일 null로 강제** (모델의 환각 방지)
   - "기숙사·학생생활관"은 ID 8(기타)로 강제 분류
@@ -120,7 +120,7 @@
 
 각각 다른 검색 전략이 필요했습니다. 이미 LLM이 분석해 채워둔 구조화 메타데이터(`activity_types[]`, `keywords[]`, `deadline`, `campus`)를 활용하는 게 자연스러워 **single function call 패턴의 agentic RAG**로 전환했습니다.
 
-> 위 0.15~0.42 수치는 1차 측정(2026-05) 값입니다. 이후 로컬 GPU를 쓸 수 없게 되어 재측정한 결과, 당시 비교 방법에 결함이 있었음을 확인했습니다 — 모델 간 similarity **절대값**을 비교한 것이 문제였고, 실제로 중요한 건 관련/무관 질의의 **분리 폭**이었습니다. 현재는 `text-embedding-3-small`(`dimensions=1024`) 기준 관련 질의 0.42~0.58 / 무관 질의 최대 0.30으로 임계값 0.36을 사용합니다. 자세한 내용은 `docs/portfolio/csc-ai-system.md` §3.2.
+> 위 0.15~0.42 수치는 1차 측정(2026-05) 값입니다. 이후 로컬 GPU를 쓸 수 없게 되어 재측정한 결과, 당시 비교 방법에 결함이 있었음을 확인했습니다 — 모델 간 similarity **절대값**을 비교한 것이 문제였고, 실제로 중요한 건 관련/무관 질의의 **분리 폭**이었습니다. 현재는 `text-embedding-3-small`(`dimensions=1024`) 기준 관련 질의 0.42~0.58 / 무관 질의 최대 0.30으로 임계값 0.36을 사용합니다. 경위는 `docs/adr/001-chatbot-search-architecture.md` 상단 갱신 note, 재현은 `scripts/measure-similarity.ts`.
 
 #### 흐름
 
@@ -154,7 +154,7 @@ UI 카드와 답변이 항상 일관되도록 — 카드는 검색 결과, 답�
 - **임베딩**: OpenAI `text-embedding-3-small`을 `dimensions=1024`로 축소. `posts.embedding` 컬럼(`vector(1024)`) + HNSW 코사인 인덱스. 유사도 임계값 0.36은 관련/무관 질의군을 실측해 결정 (`scripts/measure-similarity.ts`)
 - **할루시네이션 방지**: 시스템 프롬프트에 "tool 결과만 근거로 답변, 추측 금지" 명시 + `[텍스트](url)` 같은 마크다운 링크 금지
 - **SSE 스트리밍**: 답변 생성과 동시에 관련 공지 카드를 먼저 표시 → 체감 응답 속도 개선
-- **Rate limit**: `rate_limits` 테이블 + `increment_rate_limit` RPC로 IP당 분당 20회 제한 (서버리스 인스턴스 간 공유)
+- **Rate limit**: `rate_limits` 테이블 + `increment_rate_limit` RPC로 IP당 분당 12회 제한 (서버리스는 인스턴스가 여러 개라 메모리 카운터가 무의미 → DB로 공유)
 
 ### ⑦ 그 외 사용자 경험 개선
 
@@ -253,12 +253,15 @@ src/
 │   ├── calendar/                      # 마감/행사 캘린더 페이지
 │   ├── bookmarks/                     # 북마크 + 마감 알림 페이지
 │   ├── admin/                         # 관리자 대시보드
+│   ├── layout.tsx                     # 루트 레이아웃 (Provider·챗봇 마운트)
 │   └── page.tsx                       # 메인 피드
 ├── components/
 │   ├── Header.tsx          FilterPanel.tsx    PostCard.tsx
 │   ├── PostList.tsx        FeedSection.tsx    Calendar.tsx
 │   ├── SearchBar.tsx       Chatbot.tsx        DeadlineAlert.tsx
-│   └── EmptyState.tsx
+│   ├── EmptyState.tsx      atoms.tsx          # 공용 UI 프리미티브
+│   ├── RecommendedCarousel.tsx               # 개인화 추천 캐러셀
+│   └── ThisWeekStrip.tsx                     # 2주 마감·행사 스트립
 ├── contexts/
 │   ├── AuthContext.tsx                # Supabase Auth 상태
 │   └── ThemeContext.tsx               # 다크모드
