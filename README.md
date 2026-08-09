@@ -454,17 +454,49 @@ npm run dev:restart  # 포트 점유 노드 정리 후 재시작
 
 ## 배포
 
-Vercel에 배포되며, 크롤링 API는 서버리스 함수 한도를 늘려 운영합니다.
+Vercel에 배포되며, 오래 걸리는 라우트는 서버리스 함수 실행 시간 한도를 늘립니다.
 
 ```json
 {
   "functions": {
-    "src/app/api/crawl/route.ts": { "maxDuration": 60, "memory": 1024 }
+    "src/app/api/crawl/route.ts": { "maxDuration": 60 },
+    "src/app/api/llm/test/route.ts": { "maxDuration": 30 }
   }
 }
 ```
 
-Vercel Cron으로 주기적인 `/api/crawl` 호출을 트리거합니다.
+`/api/crawl` 호출은 **현재 수동 트리거**입니다. 스케줄러는 등록하지 않았습니다 — 이유는 아래 "운영상 알려진 한계" 참고.
+
+---
+
+## 운영상 알려진 한계
+
+포트폴리오용 데모가 아니라 실제로 배포해 운영하다 보니 무료 인프라의 제약을 만났습니다. 숨기기보다 인지하고 관리하는 쪽을 택했습니다.
+
+### 1. 크롤링 스케줄러 미등록
+
+파이프라인·인증(`CRON_SECRET`)·실행 시간 한도(`maxDuration`)는 모두 준비돼 있으나 `vercel.json`에 cron을 등록하지 않았습니다.
+
+Vercel Cron은 **Hobby 플랜에서도 무료**로 제공되지만 제약이 있습니다.
+
+| | 개수 | 최소 간격 | 시각 정밀도 |
+|---|---|---|---|
+| Hobby | 100개 | 하루 1회 | ±59분 |
+| Pro | 100개 | 분당 1회 | 분 단위 |
+
+붙일 때는 Vercel 환경변수에 `LLM_ENABLED=true` + `LLM_PROVIDER=openai`를 함께 등록해야 합니다. 없으면 신규 게시물이 요약 없이 저장되고, `categorizer.ts` 키워드 폴백으로만 분류됩니다.
+
+### 2. Supabase 무료 플랜 자동 정지
+
+무료 플랜은 **약 7일간 요청이 없으면 프로젝트를 자동 일시정지**합니다. 정지되면 DB 접근이 전부 실패하는데, 프론트엔드는 정상 렌더되고 데이터만 비어 보여서 **겉으로는 장애인지 알기 어렵습니다.**
+
+실제로 2026-08-08에 이 문제로 서비스가 멈췄습니다. `/api/posts`가 `{"error":"Failed to fetch posts","posts":[],"total":0}`를 반환했고, 홈은 HTTP 200이었습니다. 원인 규명 전까지는 코드 회귀로 오인하기 쉬운 형태였습니다.
+
+1번과 2번은 맞물려 있습니다. **스케줄러를 등록하면 주기적 DB 접근이 발생해 자동 정지도 함께 예방**됩니다. 하루 1회 실행이면 7일 기준을 여유 있게 충족합니다.
+
+### 3. 중복 공지
+
+학교가 동일한 공지를 여러 번 게시하는 경우가 있습니다(같은 제목, 다른 게시글 번호·작성일). 크롤러는 `original_url` 기준으로 중복을 거르므로 이들은 별개 게시물로 저장됩니다 — 데이터는 게시판 상태를 정확히 반영하지만, 피드와 챗봇 답변에 같은 공지가 여러 번 노출됩니다. 제목 기준 그룹화는 미적용입니다.
 
 ---
 
@@ -490,12 +522,3 @@ Vercel Cron으로 주기적인 `/api/crawl` 호출을 트리거합니다.
 | cheonan | 천안 | 공과대학 |
 | yesan | 예산 | 산업과학대학 |
 
----
-
-## 문서
-
-| 문서 | 한국어 | English |
-|------|--------|---------|
-| API Reference | [한국어](doc/api/api-reference.ko.md) | [English](doc/api/api-reference.en.md) |
-| System Architecture | [한국어](doc/architecture/system-architecture.ko.md) | [English](doc/architecture/system-architecture.en.md) |
-| Feature Specification | [한국어](doc/features/feature-specification.ko.md) | [English](doc/features/feature-specification.en.md) |
