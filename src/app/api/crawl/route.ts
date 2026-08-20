@@ -78,14 +78,28 @@ export async function GET(request: NextRequest) {
     console.log(`크롤링 페이지 수: ${maxPages}`);
     const crawledPosts = await crawlAllPosts(maxPages);
 
-    // 새 게시글만 필터링 (정규화된 URL로 비교)
-    const newPosts = crawledPosts.filter(
+    // 0차: 배치 내부 중복 제거.
+    // 상단 고정 공지는 모든 페이지에 반복 노출되므로 N페이지를 돌면 같은 URL이 N번 잡힌다.
+    // 기존 DB 대조만으로는 이걸 못 거른다 — 빈 DB에서도 unique 충돌이 18건 났다.
+    // 상세 크롤링·LLM 분석 앞에서 걸러야 분석 비용이 낭비되지 않는다.
+    const seenInBatch = new Set<string>();
+    const uniqueCrawled = crawledPosts.filter((post) => {
+      const key = normalizeOriginalUrl(post.original_url);
+      if (!key) return true; // 정규화 실패 시에는 거르지 않는다
+      if (seenInBatch.has(key)) return false;
+      seenInBatch.add(key);
+      return true;
+    });
+    const duplicatesInBatch = crawledPosts.length - uniqueCrawled.length;
+
+    // 1차: 이미 DB에 있는 글 제외 (정규화된 URL로 비교)
+    const newPosts = uniqueCrawled.filter(
       (post) => !existingUrls.has(normalizeOriginalUrl(post.original_url))
     );
 
-    const skippedExisting = crawledPosts.length - newPosts.length;
+    const skippedExisting = uniqueCrawled.length - newPosts.length;
     console.log(
-      `Found ${crawledPosts.length} posts, ${newPosts.length} new, ${skippedExisting} already in DB`
+      `Found ${crawledPosts.length} posts, ${duplicatesInBatch} duplicate in batch, ${newPosts.length} new, ${skippedExisting} already in DB`
     );
 
     // 상세 페이지 크롤링 및 DB 저장
@@ -182,6 +196,10 @@ export async function GET(request: NextRequest) {
           }
         } else {
           results.push(data);
+          // 배치 내부에서 2차 dedupe가 실제로 동작하려면 방금 넣은 URL을 반영해야 한다.
+          // 목록 URL이 서로 달라도 detail 후 같은 shortUrl로 수렴하는 경우가 있다.
+          const insertedKey = normalizeOriginalUrl(finalUrl);
+          if (insertedKey) existingUrls.add(insertedKey);
 
           // 임베딩 생성 (OpenAI 사용 가능 시)
           if (data && data[0]) {
@@ -273,6 +291,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       crawled: crawledPosts.length,
+      duplicatesInBatch,
       newPosts: newPosts.length,
       inserted: results.length,
       llmAnalyzed: llmSuccessCount,
