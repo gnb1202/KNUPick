@@ -192,7 +192,7 @@ function CarouselArrow({ side, visible, onClick }: CarouselArrowProps) {
         zIndex: 5,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = 'var(--accent)';
+        e.currentTarget.style.background = 'var(--action)';
         e.currentTarget.style.color = '#fff';
       }}
       onMouseLeave={(e) => {

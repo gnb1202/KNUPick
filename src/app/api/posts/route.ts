@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { todayKST } from '@/lib/dates';
 import { APP_CONFIG } from '@/lib/constants';
 import { Post, PostWithBookmark, Campus } from '@/types';
 
@@ -9,6 +10,10 @@ export async function GET(request: NextRequest) {
     const departmentId = searchParams.get('departmentId');
     const activityTypes = searchParams.get('activityTypes');
     const campusParam = searchParams.get('campus') as Campus | null;
+    const postedPeriod = searchParams.get('posted');
+    if (postedPeriod && postedPeriod !== 'today') {
+      return NextResponse.json({ error: 'Invalid posted period' }, { status: 400 });
+    }
     const sortBy = searchParams.get('sort') || 'latest'; // latest | deadline
     const page = parseInt(searchParams.get('page') || '1');
     const pageSize = parseInt(searchParams.get('pageSize') || String(APP_CONFIG.DEFAULT_PAGE_SIZE));
@@ -40,9 +45,7 @@ export async function GET(request: NextRequest) {
     const orderConfig = getOrderConfig();
 
     // 한국 시간(KST) 기준 오늘 날짜
-    const today = new Date().toLocaleDateString('ko-KR', {
-      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit'
-    }).replace(/\. /g, '-').replace('.', '');
+    const today = todayKST();
 
     // 학과 필터가 있는 경우 - DB JOIN 쿼리 사용
     if (departmentId) {
@@ -103,6 +106,8 @@ export async function GET(request: NextRequest) {
         query = query.in('campus', ['common', campusParam]);
       }
 
+      if (postedPeriod === 'today') query = query.eq('posted_date', today);
+
       // 페이지네이션
       const from = (page - 1) * pageSize;
       const to = from + pageSize - 1;
@@ -152,6 +157,8 @@ export async function GET(request: NextRequest) {
       if (campusParam && campusParam !== 'common') {
         query = query.in('campus', ['common', campusParam]);
       }
+
+      if (postedPeriod === 'today') query = query.eq('posted_date', today);
 
       // 페이지네이션
       const from = (page - 1) * pageSize;

@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { PostWithBookmark } from '@/types';
-import { ACTIVITY_TYPES, ACTIVITY_COLORS } from '@/lib/constants';
+import { ACTIVITY_TYPES } from '@/lib/constants';
 import { daysUntil } from './atoms';
 
 const DOW_KR = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -80,13 +80,13 @@ export default function ThisWeekStrip({ posts }: Props) {
           <h2
             style={{
               margin: 0,
-              fontSize: 22,
+              fontSize: 24,
               fontWeight: 800,
               color: 'var(--text)',
               letterSpacing: -0.5,
             }}
           >
-            📅 다가오는 2주 마감 · 행사
+            다가오는 2주 마감 · 행사
           </h2>
         </div>
         <Link
@@ -148,11 +148,11 @@ export default function ThisWeekStrip({ posts }: Props) {
                     color: isToday
                       ? '#fff'
                       : dow === 0
-                        ? '#FF5A4E'
+                        ? 'var(--hot)'
                         : dow === 6
-                          ? '#3182F6'
+                          ? 'var(--accent)'
                           : 'var(--text)',
-                    background: isToday ? 'var(--accent)' : 'transparent',
+                    background: isToday ? 'var(--action)' : 'transparent',
                     padding: isToday ? '1px 7px' : 0,
                     borderRadius: isToday ? 6 : 0,
                   }}
@@ -176,8 +176,8 @@ export default function ThisWeekStrip({ posts }: Props) {
                   const at = ACTIVITY_TYPES.find((a) => a.id === it.post.activity_types[0]);
                   const baseColor =
                     it.kind === 'deadline'
-                      ? '#FF5A4E'
-                      : ACTIVITY_COLORS[it.post.activity_types[0] || 8] || '#94A3B8';
+                      ? 'var(--hot)'
+                      : 'var(--pick)';
                   const title =
                     it.post.title.length > 12
                       ? it.post.title.slice(0, 12) + '…'
@@ -191,7 +191,7 @@ export default function ThisWeekStrip({ posts }: Props) {
                       style={{
                         padding: '4px 6px',
                         borderLeft: `3px solid ${baseColor}`,
-                        background: baseColor + '14',
+                        background: it.kind === 'deadline' ? 'var(--hot-soft)' : 'var(--pick-soft)',
                         borderRadius: 3,
                         fontSize: 11,
                         lineHeight: 1.3,
@@ -215,7 +215,7 @@ export default function ThisWeekStrip({ posts }: Props) {
                         {title}
                       </span>
                       {it.kind === 'deadline' && (
-                        <span style={{ fontSize: 9, fontWeight: 800, color: '#FF5A4E' }}>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: 'var(--hot)' }}>
                           마감
                         </span>
                       )}

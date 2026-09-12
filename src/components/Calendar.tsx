@@ -2,7 +2,6 @@
 
 import { useState, useMemo } from 'react';
 import { Post } from '@/types';
-import { ACTIVITY_TYPES, ACTIVITY_COLORS } from '@/lib/constants';
 
 interface CalendarProps {
   posts: Post[];
@@ -91,6 +90,7 @@ export default function Calendar({
     >
       {/* 헤더 */}
       <div
+        className="calendar-month-header"
         style={{
           padding: '16px 20px',
           display: 'flex',
@@ -138,7 +138,7 @@ export default function Calendar({
               fontSize: 11,
               fontWeight: 700,
               letterSpacing: 0.5,
-              color: i === 0 ? '#FF5A4E' : i === 6 ? '#3182F6' : 'var(--text-mute)',
+              color: i === 0 ? 'var(--hot)' : i === 6 ? 'var(--accent)' : 'var(--text-mute)',
               borderBottom: '1px solid var(--border-soft)',
             }}
           >
@@ -155,8 +155,8 @@ export default function Calendar({
             return (
               <div
                 key={`empty-${idx}`}
+                className="calendar-empty-cell"
                 style={{
-                  minHeight: 110,
                   borderRight: dow !== 6 ? '1px solid var(--border-soft)' : 'none',
                   borderBottom: '1px solid var(--border-soft)',
                   background: 'var(--surface-2)',
@@ -172,12 +172,14 @@ export default function Calendar({
           return (
             <button
               key={key}
+              className="calendar-day"
+              aria-label={`${year}년 ${month + 1}월 ${date.getDate()}일, 일정 ${items.length}건`}
+              aria-pressed={selected}
+              aria-current={today ? 'date' : undefined}
+              data-date={key}
               onClick={() => onDateSelect(key)}
               style={{
-                all: 'unset',
                 cursor: 'pointer',
-                minHeight: 110,
-                padding: 8,
                 textAlign: 'left',
                 verticalAlign: 'top',
                 background: selected ? 'var(--accent-soft)' : 'transparent',
@@ -203,13 +205,13 @@ export default function Calendar({
                   width: today ? 24 : 'auto',
                   height: today ? 24 : 'auto',
                   borderRadius: today ? '50%' : 0,
-                  background: today ? 'var(--accent)' : 'transparent',
+                  background: today ? 'var(--action)' : 'transparent',
                   color: today
                     ? '#fff'
                     : dow === 0
-                      ? '#FF5A4E'
+                      ? 'var(--hot)'
                       : dow === 6
-                        ? '#3182F6'
+                        ? 'var(--accent)'
                         : 'var(--text)',
                   fontSize: 13,
                   fontWeight: today ? 800 : 600,
@@ -218,6 +220,7 @@ export default function Calendar({
                 {date.getDate()}
               </span>
               <div
+                className="calendar-day-items"
                 style={{
                   flex: 1,
                   display: 'flex',
@@ -229,11 +232,10 @@ export default function Calendar({
                 {items.slice(0, 3).map((item, i) => {
                   const baseColor =
                     item.type === 'deadline'
-                      ? '#FF5A4E'
+                      ? 'var(--hot)'
                       : item.type === 'event_start'
-                        ? ACTIVITY_COLORS[item.post.activity_types[0]] || '#3182F6'
-                        : '#94A3B8';
-                  const at = ACTIVITY_TYPES.find((a) => a.id === item.post.activity_types[0]);
+                        ? 'var(--pick)'
+                        : 'var(--text-dim)';
                   const titleShort =
                     item.post.title.length > 8
                       ? item.post.title.slice(0, 8) + '…'
@@ -247,7 +249,7 @@ export default function Calendar({
                         lineHeight: 1.4,
                         padding: '2px 5px',
                         borderLeft: `2px solid ${baseColor}`,
-                        background: baseColor + '14',
+                        background: item.type === 'deadline' ? 'var(--hot-soft)' : 'var(--pick-soft)',
                         color: 'var(--text)',
                         borderRadius: 3,
                         whiteSpace: 'nowrap',
@@ -256,10 +258,7 @@ export default function Calendar({
                         fontWeight: 600,
                       }}
                     >
-                      {item.type === 'deadline' && '🔴 '}
-                      {item.type === 'event_start' && '▶ '}
-                      {item.type === 'event_end' && '■ '}
-                      {at?.icon} {titleShort}
+                      {titleShort}
                     </div>
                   );
                 })}
@@ -276,6 +275,7 @@ export default function Calendar({
                   </div>
                 )}
               </div>
+              {items.length > 0 && <span className="calendar-mobile-count">{items.length}건</span>}
             </button>
           );
         })}
@@ -294,9 +294,9 @@ export default function Calendar({
           color: 'var(--text-mute)',
         }}
       >
-        <Legend color="#FF5A4E" label="마감일" />
-        <Legend color="#10B981" label="행사 시작" />
-        <Legend color="#94A3B8" label="행사 종료" />
+        <Legend color="var(--hot)" label="마감일" />
+        <Legend color="var(--pick)" label="행사 시작" />
+        <Legend color="var(--text-dim)" label="행사 종료" />
       </div>
     </div>
   );
@@ -326,7 +326,8 @@ function NavBtn({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: 30,
+        minWidth: 24,
+        minHeight: 32,
       }}
     >
       {children}

@@ -1,7 +1,7 @@
 'use client';
 
 import { CSSProperties, ReactNode } from 'react';
-import { ACTIVITY_TYPES, ACTIVITY_COLORS } from '@/lib/constants';
+import { ACTIVITY_TYPES } from '@/lib/constants';
 
 /* ============================================================
  * D-day 계산 헬퍼
@@ -94,10 +94,9 @@ export function ActivityChip({
 }) {
   const at = ACTIVITY_TYPES.find((a) => a.id === typeId);
   if (!at) return null;
-  const color = ACTIVITY_COLORS[typeId] || '#64748B';
   return (
-    <Pill bg={color + '1A'} color={color} size={size}>
-      <span>{at.icon}</span>
+    <Pill bg={typeId === 7 ? 'var(--pick-soft)' : 'var(--accent-soft)'} color={typeId === 7 ? 'var(--pick-text)' : 'var(--accent)'} size={size} className="activity-chip">
+      <span className="category-icon" aria-hidden="true">{at.icon}</span>
       {at.name}
     </Pill>
   );
@@ -117,13 +116,13 @@ export function DDay({
   if (n === null) return null;
   const u = ddayUrgency(n);
   const styleMap: Record<DDayUrgency, CSSProperties> = {
-    hot: { background: '#FF5A4E', color: '#fff' },
-    warm: { background: '#F59E0B', color: '#fff' },
-    cool: { background: '#94A3B8', color: '#fff' },
+    hot: { background: 'var(--hot-soft)', color: 'var(--hot)' },
+    warm: { background: 'var(--warm-soft)', color: 'var(--warm)' },
+    cool: { background: 'var(--surface-2)', color: 'var(--text-mute)' },
     expired: {
       background: 'transparent',
-      color: '#94A3B8',
-      border: '1px solid #94A3B8',
+      color: 'var(--text-dim)',
+      border: '1px solid var(--border)',
     },
     none: {},
   };
@@ -142,48 +141,6 @@ export function DDay({
     >
       {ddayLabel(date)}
     </span>
-  );
-}
-
-/* ============================================================
- * SourceMark - 출처 이니셜 뱃지
- * ============================================================ */
-export function SourceMark({
-  source,
-  size = 22,
-}: {
-  source: string | null | undefined;
-  size?: number;
-}) {
-  const ch = (source || '?').trim()[0] || '?';
-  const colors = [
-    '#FF5A4E',
-    '#3182F6',
-    '#0EBD8C',
-    '#7C5CFF',
-    '#F59E0B',
-    '#06B6D4',
-    '#EC4899',
-  ];
-  const idx = (source || '').charCodeAt(0) % colors.length;
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        background: colors[idx],
-        color: '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: size * 0.45,
-        fontWeight: 700,
-        flexShrink: 0,
-      }}
-    >
-      {ch}
-    </div>
   );
 }
 
@@ -207,16 +164,9 @@ export function BookmarkBtn({
       disabled={loading}
       title={active ? '북마크 해제' : '북마크'}
       aria-label={active ? '북마크 해제' : '북마크 추가'}
-      style={{
-        all: 'unset',
-        cursor: loading ? 'not-allowed' : 'pointer',
-        padding: 6,
-        display: 'inline-flex',
-        alignItems: 'center',
-        color: active ? 'var(--accent)' : 'var(--text-dim)',
-        transition: 'color .15s, transform .15s',
-        opacity: loading ? 0.5 : 1,
-      }}
+      type="button"
+      aria-pressed={active}
+      className="bookmark-control"
     >
       <svg
         width={size}

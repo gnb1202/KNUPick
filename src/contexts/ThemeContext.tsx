@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, ReactNode } from 'react';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -15,18 +15,13 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   // 하이드레이션 일치를 위해 서버와 클라이언트 모두 'system'으로 시작
-  const [theme, setThemeState] = useState<Theme>('system');
+  const theme = useSyncExternalStore(
+    callback => { window.addEventListener('storage', callback); window.addEventListener('knupick-theme', callback); return () => { window.removeEventListener('storage', callback); window.removeEventListener('knupick-theme', callback); }; },
+    () => { const value = localStorage.getItem('theme'); return (value && ['light','dark','system'].includes(value) ? value : 'system') as Theme; },
+    () => 'system' as Theme,
+  );
   const [isDark, setIsDark] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  // 클라이언트에서만 localStorage에서 테마 읽기
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as Theme;
-    if (savedTheme && ['light', 'dark', 'system'].includes(savedTheme)) {
-      setThemeState(savedTheme);
-    }
-    setMounted(true);
-  }, []);
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
 
   // 테마 변경 시 적용
   useEffect(() => {
@@ -54,8 +49,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   const setTheme = (newTheme: Theme) => {
-    setThemeState(newTheme);
     localStorage.setItem('theme', newTheme);
+    window.dispatchEvent(new Event('knupick-theme'));
   };
 
   return (

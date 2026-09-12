@@ -138,7 +138,7 @@ export default function ProfilePage() {
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-slate-500">로딩 중...</div>
+        <div className="text-[var(--text-dim)]">로딩 중...</div>
       </div>
     );
   }
@@ -163,10 +163,10 @@ export default function ProfilePage() {
       <div className="max-w-2xl mx-auto">
         {/* 헤더 */}
         <div className="flex items-center justify-between mb-8">
-          <Link href="/" className="text-slate-500 hover:text-[#033885] transition-colors">
+          <Link href="/" className="text-[var(--text-dim)] hover:text-[var(--accent)] transition-colors">
             ← 홈으로
           </Link>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+          <h1 className="text-2xl font-bold text-[var(--text)]">
             프로필 설정
           </h1>
           <button
@@ -193,36 +193,36 @@ export default function ProfilePage() {
           )}
 
           {/* 기본 정보 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-[var(--text)] mb-4">
               기본 정보
             </h2>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-[var(--text)] mb-1">
                   아이디
                 </label>
                 <input
                   type="text"
                   value={profile?.username || ''}
                   disabled
-                  className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                           text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                  className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                           text-[var(--text-dim)] cursor-not-allowed"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                <label className="block text-sm font-medium text-[var(--text)] mb-1">
                   닉네임 (선택)
                 </label>
                 <input
                   type="text"
                   value={nickname}
                   onChange={(e) => setNickname(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                           text-slate-900 dark:text-white placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                  className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                           text-[var(--text)] placeholder:text-[var(--text-dim)]
+                           focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                            transition-all duration-200"
                   placeholder="닉네임 입력"
                 />
@@ -231,15 +231,15 @@ export default function ProfilePage() {
           </div>
 
           {/* 캠퍼스 & 학과 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-[var(--text)] mb-4">
               소속 정보
             </h2>
 
             <div className="space-y-4">
               {/* 캠퍼스 선택 */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
                   캠퍼스
                 </label>
                 <div className="flex flex-wrap gap-2">
@@ -253,8 +253,8 @@ export default function ProfilePage() {
                       }}
                       className={`px-4 py-2 text-sm rounded-xl transition-colors
                         ${campus === option.value
-                          ? 'bg-[#033885] text-white'
-                          : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                          ? 'bg-[var(--action)] text-white'
+                          : 'bg-[var(--surface-2)] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                         }`}
                     >
                       {option.label}
@@ -265,15 +265,15 @@ export default function ProfilePage() {
 
               {/* 학과 선택 */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                <label className="block text-sm font-medium text-[var(--text)] mb-2">
                   학과
                 </label>
                 <select
                   value={departmentId || ''}
                   onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : null)}
-                  className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                           text-slate-900 dark:text-white
-                           focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                  className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                           text-[var(--text)]
+                           focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                            transition-all duration-200"
                 >
                   <option value="">학과 선택</option>
@@ -291,11 +291,11 @@ export default function ProfilePage() {
           </div>
 
           {/* 관심 활동유형 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-[var(--text)] mb-4">
               관심 활동유형
             </h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+            <p className="text-sm text-[var(--text-dim)] mb-4">
               관심 있는 활동유형을 선택하면 해당 공고를 우선적으로 보여드려요
             </p>
 
@@ -307,8 +307,8 @@ export default function ProfilePage() {
                   onClick={() => handleActivityTypeToggle(type.id)}
                   className={`px-4 py-2 text-sm rounded-xl transition-colors
                     ${preferredTypes.includes(type.id)
-                      ? 'bg-[#033885] text-white'
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
+                      ? 'bg-[var(--action)] text-white'
+                      : 'bg-[var(--surface-2)] text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600'
                     }`}
                 >
                   {type.name}
@@ -318,17 +318,17 @@ export default function ProfilePage() {
           </div>
 
           {/* 맞춤 키워드 */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
-            <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
+            <h2 className="text-lg font-semibold text-[var(--text)] mb-4">
               맞춤 키워드
             </h2>
 
             {/* 관심 키워드 */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--text)] mb-2">
                 관심 키워드
               </label>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-sm text-[var(--text-dim)] mb-3">
                 이 키워드가 포함된 공지를 우선적으로 보여드려요
               </p>
 
@@ -343,17 +343,17 @@ export default function ProfilePage() {
                       handleAddCustomKeyword();
                     }
                   }}
-                  className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                           text-slate-900 dark:text-white placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                  className="flex-1 px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                           text-[var(--text)] placeholder:text-[var(--text-dim)]
+                           focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                            transition-all duration-200"
                   placeholder="예: 해커톤, 창업, AI"
                 />
                 <button
                   type="button"
                   onClick={handleAddCustomKeyword}
-                  className="px-4 py-2.5 bg-[#033885] text-white rounded-xl
-                           hover:bg-[#022a66] transition-colors"
+                  className="px-4 py-2.5 bg-[var(--action)] text-white rounded-xl
+                           hover:bg-[var(--action-hover)] transition-colors"
                 >
                   추가
                 </button>
@@ -384,10 +384,10 @@ export default function ProfilePage() {
 
             {/* 제외 키워드 */}
             <div>
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--text)] mb-2">
                 제외 키워드
               </label>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-3">
+              <p className="text-sm text-[var(--text-dim)] mb-3">
                 이 키워드가 포함된 공지는 숨겨드려요
               </p>
 
@@ -402,9 +402,9 @@ export default function ProfilePage() {
                       handleAddExcludedKeyword();
                     }
                   }}
-                  className="flex-1 px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                           text-slate-900 dark:text-white placeholder-slate-400
-                           focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                  className="flex-1 px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                           text-[var(--text)] placeholder:text-[var(--text-dim)]
+                           focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                            transition-all duration-200"
                   placeholder="예: 대학원, 석사"
                 />
@@ -446,8 +446,8 @@ export default function ProfilePage() {
           <button
             type="submit"
             disabled={isSaving}
-            className="w-full py-3 bg-[#033885] text-white font-semibold rounded-xl
-                     hover:bg-[#022a66] transition-colors duration-200
+            className="w-full py-3 bg-[var(--action)] text-white font-semibold rounded-xl
+                     hover:bg-[var(--action-hover)] transition-colors duration-200
                      disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? '저장 중...' : '프로필 저장'}
@@ -456,10 +456,10 @@ export default function ProfilePage() {
 
         {/* 회원탈퇴 영역 */}
         <div className="mt-10 pt-6 border-t border-slate-200 dark:border-slate-700">
-          <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-2">
+          <h2 className="text-sm font-semibold text-[var(--text-dim)] mb-2">
             계정 관리
           </h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+          <p className="text-sm text-[var(--text-dim)] mb-4">
             탈퇴 시 프로필, 북마크 등 모든 정보가 영구 삭제됩니다.
           </p>
           <button

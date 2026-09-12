@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { ACTIVITY_TYPES, CAMPUS_LABELS } from '@/lib/constants';
 import { ddayLabel } from './atoms';
 import { ChatAnswer } from './ChatAnswer';
+import BrandMark from './BrandMark';
 import type { Evidence } from '@/lib/evidence';
 
 interface RelatedPost {
@@ -268,39 +269,20 @@ export default function Chatbot() {
             zIndex: 90,
             width: 56,
             height: 56,
-            borderRadius: '50%',
-            background: 'var(--accent)',
+            borderRadius: 16,
+            background: 'var(--action)',
             color: '#fff',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             boxShadow: hover
-              ? '0 14px 40px rgba(0,0,0,0.22), 0 0 0 6px color-mix(in oklab, var(--accent) 16%, transparent)'
-              : '0 8px 24px rgba(0,0,0,0.18)',
+              ? '0 10px 28px rgba(22,44,71,0.22)'
+              : '0 6px 18px rgba(22,44,71,0.18)',
             transition: 'transform .18s, box-shadow .18s',
             transform: hover ? 'translateY(-2px) scale(1.04)' : 'none',
           }}
         >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            <circle cx="8.5" cy="10" r="0.6" fill="currentColor" />
-            <circle cx="12" cy="10" r="0.6" fill="currentColor" />
-            <circle cx="15.5" cy="10" r="0.6" fill="currentColor" />
-          </svg>
-          <span
-            style={{
-              position: 'absolute',
-              top: 6,
-              right: 8,
-              width: 14,
-              height: 14,
-              fontSize: 10,
-              fontWeight: 800,
-              textShadow: '0 1px 2px rgba(0,0,0,0.2)',
-            }}
-          >
-            ✦
-          </span>
+          <BrandMark size={30} inverse />
         </button>
       )}
 
@@ -346,7 +328,7 @@ export default function Chatbot() {
                   width: 36,
                   height: 36,
                   borderRadius: 10,
-                  background: 'var(--accent)',
+                  background: 'var(--action)',
                   color: '#fff',
                   display: 'flex',
                   alignItems: 'center',
@@ -355,7 +337,7 @@ export default function Chatbot() {
                   fontWeight: 800,
                 }}
               >
-                ✦
+                <BrandMark size={24} inverse />
               </div>
               <div style={{ flex: 1 }}>
                 <div
@@ -366,7 +348,7 @@ export default function Chatbot() {
                     letterSpacing: -0.3,
                   }}
                 >
-                  KNUPick AI 어시스턴트
+                  KNUPICK AI 어시스턴트
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 1 }}>
                   공주대 공지만 참고해 답변해요
@@ -632,7 +614,7 @@ export default function Chatbot() {
                     cursor: !input.trim() || isLoading ? 'not-allowed' : 'pointer',
                     padding: '8px 14px',
                     borderRadius: 10,
-                    background: !input.trim() || isLoading ? 'var(--surface-2)' : 'var(--accent)',
+                    background: !input.trim() || isLoading ? 'var(--surface-2)' : 'var(--action)',
                     color: !input.trim() || isLoading ? 'var(--text-dim)' : '#fff',
                     fontSize: 13,
                     fontWeight: 700,

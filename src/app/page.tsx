@@ -9,6 +9,8 @@ import SearchBar from '@/components/SearchBar';
 import DeadlineAlert from '@/components/DeadlineAlert';
 import RecommendedCarousel from '@/components/RecommendedCarousel';
 import ThisWeekStrip from '@/components/ThisWeekStrip';
+import NoticeSummary, { type NoticeSummaryVariant } from '@/components/NoticeSummary';
+import { useNoticeStats } from '@/components/useNoticeStats';
 import { useAuth } from '@/contexts/AuthContext';
 import { PostWithBookmark, Campus } from '@/types';
 import { searchInFields } from '@/lib/search';
@@ -18,12 +20,15 @@ function HomeContent() {
   const { user, profile } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { stats: noticeStats, error: statsError, loading: statsLoading, refresh: refreshStats } = useNoticeStats();
 
   const [posts, setPosts] = useState<PostWithBookmark[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showExpired, setShowExpired] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [availablePostCount, setAvailablePostCount] = useState(0);
 
+  const [recommendationError, setRecommendationError] = useState('');
   const [recommendedPosts, setRecommendedPosts] = useState<PostWithBookmark[]>([]);
   const [isRecommendedLoading, setIsRecommendedLoading] = useState(false);
 
@@ -32,6 +37,10 @@ function HomeContent() {
   const typesParam = searchParams.get('types');
   const campusParam = searchParams.get('campus');
   const sortParam = searchParams.get('sort') || 'latest';
+  const todayOnly = searchParams.get('period') === 'today';
+  const statsDate = todayOnly ? noticeStats?.date : undefined;
+  const comparingNotices = searchParams.get('compare') === 'notices';
+  const noticeVariant: NoticeSummaryVariant = comparingNotices && searchParams.get('noticeView') === 'overview' ? 'overview' : 'user';
 
   const selectedDepartment = deptParam ? parseInt(deptParam) : null;
   const selectedCampus = (campusParam as Campus) || null;
@@ -61,9 +70,17 @@ function HomeContent() {
 
   // URL 업데이트
   const updateURL = useCallback(
-    (params: { dept?: number | null; types?: number[]; campus?: Campus | null; sort?: string }) => {
+    (params: { dept?: number | null; types?: number[]; campus?: Campus | null; sort?: string; period?: 'today' | null; noticeView?: NoticeSummaryVariant }) => {
       const currentUrl = new URL(window.location.href);
       const newParams = new URLSearchParams();
+      // Keep the comparison controls while changing real feed filters.
+      for (const key of ['preview', 'compare', 'noticeView']) {
+        const value = currentUrl.searchParams.get(key);
+        if (value) newParams.set(key, value);
+      }
+      if (params.noticeView) newParams.set('noticeView', params.noticeView);
+      const period = params.period !== undefined ? params.period : currentUrl.searchParams.get('period');
+      if (period === 'today') newParams.set('period', period);
 
       const currentDept = currentUrl.searchParams.get('dept');
       const currentTypes = currentUrl.searchParams.get('types');
@@ -114,7 +131,7 @@ function HomeContent() {
 
   // posts 로드
   useEffect(() => {
-    const currentParamsKey = `${deptParam || ''}-${typesParam || ''}-${campusParam || ''}-${sortParam}-${user?.id || ''}`;
+    const currentParamsKey = `${deptParam || ''}-${typesParam || ''}-${campusParam || ''}-${sortParam}-${user?.id || ''}-${todayOnly}-${statsDate || ''}`;
     if (prevParamsRef.current !== null && prevParamsRef.current === currentParamsKey) return;
     prevParamsRef.current = currentParamsKey;
 
@@ -127,6 +144,7 @@ function HomeContent() {
         if (typesParam) params.set('activityTypes', typesParam);
         if (campusParam) params.set('campus', campusParam);
         if (sortParam && sortParam !== 'latest') params.set('sort', sortParam);
+        if (todayOnly) params.set('posted', 'today');
 
         const headers: HeadersInit = {};
         if (user?.id) headers['x-user-id'] = user.id;
@@ -138,17 +156,19 @@ function HomeContent() {
         if (!response.ok) throw new Error('Failed to fetch posts');
         const data = await response.json();
         setPosts(data.posts);
+        setAvailablePostCount(data.total ?? data.posts.length);
         setIsLoading(false);
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return;
         console.error('Fetch error:', error);
         setPosts([]);
+        setAvailablePostCount(0);
         setIsLoading(false);
       }
     };
     fetchData();
     return () => controller.abort();
-  }, [deptParam, typesParam, campusParam, sortParam, user?.id]);
+  }, [deptParam, typesParam, campusParam, sortParam, user?.id, todayOnly, statsDate]);
 
   const handleBookmarkChange = useCallback((postId: number, isBookmarked: boolean) => {
     setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, isBookmarked } : p)));
@@ -163,16 +183,18 @@ function HomeContent() {
     }
     const fetchRecommendations = async () => {
       setIsRecommendedLoading(true);
+      setRecommendationError('');
       try {
         const response = await fetch('/api/recommendations?limit=6', {
           headers: { 'x-user-id': user.id },
         });
-        if (response.ok) {
-          const data = await response.json();
-          setRecommendedPosts(data.posts || []);
-        }
+        if (!response.ok) throw new Error('추천을 불러오지 못했어요. 잠시 후 다시 시도해주세요.');
+        const data = await response.json();
+        setRecommendedPosts(data.posts || []);
       } catch (error) {
         console.error('추천 조회 오류:', error);
+        setRecommendedPosts([]);
+        setRecommendationError(error instanceof Error ? error.message : '추천을 불러오지 못했어요.');
       } finally {
         setIsRecommendedLoading(false);
       }
@@ -188,156 +210,80 @@ function HomeContent() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      <main
-        style={{
-          maxWidth: 1180,
-          margin: '0 auto',
-          padding: '32px 24px 64px',
-          display: 'grid',
-          gap: 32,
-        }}
-      >
-        {/* 인사 헤딩 */}
-        <section className="animate-fade-up">
-          {greetingName && campusLabel && (
-            <div style={{ fontSize: 13, color: 'var(--text-dim)', fontWeight: 600 }}>
-              {profile?.department_id ? `학과 추천 · ` : ''}
-              {campusLabel}캠퍼스
-            </div>
-          )}
-          <h1
-            style={{
-              margin: '6px 0 0',
-              fontSize: 28,
-              fontWeight: 800,
-              color: 'var(--text)',
-              letterSpacing: -0.7,
-              lineHeight: 1.2,
-            }}
-          >
-            {greetingName ? (
-              <>
-                {greetingName}님, 오늘{' '}
-                <span style={{ color: 'var(--accent)' }}>{filteredPostCount}건</span>의 공지를
-                골라봤어요
-              </>
-            ) : (
-              <>
-                나에게 딱 맞는 활동을{' '}
-                <span style={{ color: 'var(--accent)' }}>찾아보세요</span>
-              </>
-            )}
+      <main id="main-content" className="home-main">
+        <section className="home-hero">
+          <h1 className="hero-title">
+            <span>당신을 위한 공지,</span>{' '}<span>여기서 <strong>PICK</strong></span>
           </h1>
-          {!greetingName && (
-            <p style={{ margin: '8px 0 0', fontSize: 14, color: 'var(--text-mute)' }}>
-              학과와 관심분야를 설정하면 더 정확하게 추천해드려요
-            </p>
-          )}
+          <div className="hero-search">
+            <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="어떤 공지를 찾고 있나요?" />
+            {greetingName && <p className="hero-profile">
+              {greetingName}님, 반가워요.{campusLabel ? ` · ${campusLabel}캠퍼스` : ''}
+            </p>}
+          </div>
         </section>
 
-        {/* 마감 알림 */}
         <DeadlineAlert userId={user?.id || null} />
-
-        {/* 검색 */}
-        <SearchBar value={searchQuery} onChange={setSearchQuery} />
-
-        {/* 다가오는 2주 마감/행사 */}
-        {!isLoading && <ThisWeekStrip posts={posts} />}
 
         {/* 추천 — 로그인 사용자만 */}
         {user && (
           <RecommendedCarousel
-            title={`✨ ${greetingName || '나'}님께 딱 맞는 공지`}
+            title={`${greetingName || '나'}님을 위한 추천`}
             posts={recommendedPosts}
+            emptyMessage={recommendationError || '추천할 공지가 없어요.'}
             isLoading={isRecommendedLoading}
             userId={user.id}
             onBookmarkChange={handleBookmarkChange}
-            emptyMessage="추천할 공지를 찾고 있어요. 프로필에서 관심 키워드를 설정해보세요!"
             perPage={3}
           />
         )}
 
-        {/* 필터 + 전체 그리드 */}
-        <section style={{ display: 'grid', gap: 16 }}>
+        <section id="opportunities" className="feed-section" aria-labelledby="feed-title">
+          <NoticeSummary stats={noticeStats} error={statsError} loading={statsLoading}
+            variant={noticeVariant} comparison={comparingNotices} todayOnly={todayOnly}
+            onVariantChange={noticeView => updateURL({ noticeView })}
+            onTodayToggle={() => updateURL({ period: todayOnly ? null : 'today' })}
+            onRetry={() => void refreshStats()} />
           <FilterPanel
             selectedDepartment={selectedDepartment}
             onDepartmentChange={handleDepartmentChange}
             selectedActivityTypes={selectedActivityTypes}
             onActivityTypeToggle={handleActivityTypeToggle}
+            onActivityTypesClear={() => updateURL({ types: [] })}
             selectedCampus={selectedCampus}
             onCampusChange={handleCampusChange}
             showExpired={showExpired}
             onShowExpiredChange={setShowExpired}
             sort={sortParam}
             onSortChange={handleSortChange}
-            resultCount={filteredPostCount}
           />
-
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              marginTop: 4,
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>
-              전체 공지{' '}
-              <span style={{ color: 'var(--text-dim)', fontWeight: 600, fontSize: 16 }}>
-                · {filteredPostCount}건
-              </span>
-              {searchQuery && (
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontSize: 13,
-                    color: 'var(--text-dim)',
-                    fontWeight: 500,
-                  }}
-                >
-                  &quot;{searchQuery}&quot; 검색 결과
-                </span>
-              )}
-            </h2>
+          <div className="notice-results-line" role="status">
+            <span>{todayOnly ? '오늘 공지' : '전체 공지'} · {searchQuery ? `“${searchQuery}” 검색 결과` : '필터 결과'} <strong>{isLoading ? '확인 중' : `${filteredPostCount.toLocaleString()}건`}</strong></span>
+            {availablePostCount > posts.length && <span className="notice-results-limit">불러온 {posts.length.toLocaleString()}건 기준</span>}
           </div>
-
-          <PostList
+          {todayOnly && !isLoading && filteredPostCount === 0 ? <div className="notice-today-empty">
+            <h3>{noticeStats?.todayCount === 0 ? '오늘 올라온 공지가 아직 없어요.' : '조건에 맞는 오늘 공지가 없어요.'}</h3>
+            <p>전체 공지에서 다른 소식도 확인해 보세요.</p>
+            <button className="button-primary" type="button" onClick={() => { setSearchQuery(''); updateURL({ period: null, types: [], dept: null, campus: null, sort: 'latest' }); }}>전체 공지 보기</button>
+          </div> : <PostList
+            onResetFilters={() => { setSearchQuery(''); updateURL({ types: [], dept: null, campus: null, sort: 'latest', period: null }); }}
             posts={searchedPosts}
             isLoading={isLoading}
             showExpired={showExpired}
             userId={user?.id}
             onBookmarkChange={handleBookmarkChange}
-          />
+          />}
         </section>
+        {!isLoading && <ThisWeekStrip posts={posts} />}
       </main>
 
-      <footer
-        style={{
-          marginTop: 32,
-          padding: '32px 24px',
-          borderTop: '1px solid var(--border-soft)',
-          background: 'var(--surface)',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 1180,
-            margin: '0 auto',
-            textAlign: 'center',
-            fontSize: 13,
-            color: 'var(--text-dim)',
-          }}
-        >
-          <p style={{ margin: 0 }}>© 2024 KNUPick. 공주대학교 학생을 위한 서비스입니다.</p>
-          <p style={{ margin: '6px 0 0' }}>
-            문의:{' '}
-            <a
-              href="mailto:support@knupick.kr"
-              style={{ color: 'var(--accent)', textDecoration: 'none' }}
-            >
-              support@knupick.kr
-            </a>
-          </p>
+      <footer className="home-footer">
+        <div className="footer-inner">
+          <div>
+            <span className="footer-brand">KNUPICK</span>
+            <p>지원 조건과 일정은 공지 원문에서 한 번 더 확인해 주세요.</p>
+          </div>
+          <a href="mailto:support@knupick.kr">문의 · support@knupick.kr</a>
         </div>
       </footer>
     </div>

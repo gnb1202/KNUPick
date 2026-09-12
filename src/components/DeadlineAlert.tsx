@@ -70,7 +70,7 @@ export default function DeadlineAlert({ userId }: DeadlineAlertProps) {
           width: 38,
           height: 38,
           borderRadius: '50%',
-          background: 'var(--accent)',
+          background: 'var(--action)',
           color: '#fff',
           display: 'flex',
           alignItems: 'center',
@@ -134,7 +134,7 @@ export default function DeadlineAlert({ userId }: DeadlineAlertProps) {
         style={{
           padding: '8px 14px',
           borderRadius: 10,
-          background: 'var(--accent)',
+          background: 'var(--action)',
           color: '#fff',
           fontSize: 13,
           fontWeight: 700,
