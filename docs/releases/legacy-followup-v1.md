@@ -30,7 +30,8 @@
 
 ## 2026-09-12 운영 반영 결과
 
-- 코드 커밋 `094b4ed646b0103ce490b3a772d9d7f84141cda6`, 배포 `dpl_2D1GVhqiPHZ5RgE514y6bwb1yrjp`. CLI로 소스를 업로드했으며 GitHub에는 푸시하지 않았다. 결과를 기록하는 후속 문서 커밋은 배포 코드 커밋과 별개다.
+- 코드 커밋 `094b4ed646b0103ce490b3a772d9d7f84141cda6`, 배포 `dpl_2D1GVhqiPHZ5RgE514y6bwb1yrjp`. CLI로 소스를 업로드했으며 배포 당시에는 GitHub에 푸시하지 않았다. 결과를 기록하는 후속 문서 커밋은 배포 코드 커밋과 별개다.
+- 같은 날 배포한 변경만 `codex/legacy-followup-release`에 푸시하고 [PR #5](https://github.com/gnb1202/KNUPick/pull/5)를 열었다. 기준 `main`은 여전히 `3cb2a361...`이며 35개 변경 파일의 범위·해시와 기존 운영 패키지 191개의 버전 유지를 확인했다. 배포 코드 이후의 차이는 README와 이 기록뿐이다. PR 생성 후 첫 Vercel 미리보기 빌드는 통과했으며, 이 시점에는 `main` 병합과 운영 재배포를 하지 않았다.
 - `--prod --skip-domain`으로 Node.js 24.x 원격 빌드와 별도 URL의 무료 API 검증 3건을 완료한 뒤 `vercel promote`로 [운영 도메인](https://knu-pick.vercel.app)을 전환했다. 이후 실제 별칭이 새 배포를 가리킴을 확인했다.
 - 홈·일반 공지 목록 HTTP 200, 실제 클라이언트 번들의 토큰·근거 UI·연결 중단 처리 포함을 확인했다. 빈 메시지 400, 변조 토큰 400, 토큰 없는 번호 참조의 안내 SSE 200을 운영에서도 각각 확인했다. `X-Request-Id`, `X-Chat-Version: agentic`, SSE의 `X-Chat-Grounding-Version: legacy-followup-v1`이 확인됐다.
 - Supabase `tqqnckapynzllekjgbvo`에 기존 `202609080005_legacy_clock.sql`만 적용했다. MCP 운영 이력은 **`20260912091149 / legacy_clock`**이다. 파일명 시각과 MCP 적용 시각은 다르며 이 대응을 보존한다. 누적 마이그레이션의 CLI 일괄 적용이나 전체 이력 정합성을 검증했다는 뜻은 아니다.
