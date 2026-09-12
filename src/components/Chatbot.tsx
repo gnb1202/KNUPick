@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { ACTIVITY_TYPES, CAMPUS_LABELS } from '@/lib/constants';
 import { ddayLabel } from './atoms';
+import { ChatAnswer } from './ChatAnswer';
+import type { Evidence } from '@/lib/evidence';
 
 interface RelatedPost {
   id: number;
@@ -21,6 +23,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   posts?: RelatedPost[];
+  evidence?: Evidence[];
   isStreaming?: boolean;
 }
 
@@ -31,7 +34,7 @@ const SUGGESTED_QUESTIONS = [
   '교육·특강 신청할 만한 거 있나?',
 ];
 
-function MiniPostCard({ post }: { post: RelatedPost }) {
+function MiniPostCard({ post, position }: { post: RelatedPost; position: number }) {
   const at = ACTIVITY_TYPES.find((t) => t.id === post.activity_types[0]);
   const dateLabel = post.deadline
     ? ddayLabel(post.deadline)
@@ -69,7 +72,7 @@ function MiniPostCard({ post }: { post: RelatedPost }) {
               marginBottom: 2,
             }}
           >
-            {post.title}
+            {position}. {post.title}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
             {CAMPUS_LABELS[post.campus] || post.campus} · {dateLabel || '마감 미정'}
@@ -97,6 +100,7 @@ export default function Chatbot() {
   const [hover, setHover] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const contextTokenRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -138,22 +142,27 @@ export default function Chatbot() {
       setInput('');
       setIsLoading(true);
 
-      const historyForAPI = [...messages, userMessage].map((m) => ({
+      const historyForAPI = [...messages, userMessage].filter(m => m.content.trim()).slice(-29).map((m) => ({
         role: m.role,
-        content: m.content,
+        content: m.content.slice(0, 2000),
       }));
 
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: historyForAPI }),
+          body: JSON.stringify({ messages: historyForAPI, contextToken: contextTokenRef.current }),
         });
-        if (!res.ok || !res.body) throw new Error('API 호출 실패');
+        if (!res.ok || !res.body) {
+          const problem = await res.json().catch(() => ({}));
+          if (problem.code === 'INVALID_CONTEXT') contextTokenRef.current = undefined;
+          throw new Error(problem.error || 'API 호출 실패');
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let completed = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -169,9 +178,13 @@ export default function Chatbot() {
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === 'posts') {
+                // New cards invalidate the previous order until their signed token arrives.
+                contextTokenRef.current = undefined;
                 setMessages((prev) =>
                   prev.map((m) => (m.id === assistantId ? { ...m, posts: parsed.posts } : m))
                 );
+              } else if (parsed.type === 'evidence') {
+                setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, evidence: parsed.evidence } : m));
               } else if (parsed.type === 'text') {
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -179,10 +192,14 @@ export default function Chatbot() {
                   )
                 );
               } else if (parsed.type === 'done') {
+                completed = true;
+                contextTokenRef.current = parsed.contextToken;
                 setMessages((prev) =>
                   prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m))
                 );
               } else if (parsed.type === 'error') {
+                completed = true;
+                if (parsed.contextToken) contextTokenRef.current = parsed.contextToken;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantId
@@ -200,6 +217,7 @@ export default function Chatbot() {
             }
           }
         }
+        if (!completed) throw new Error('답변 연결이 중단되었습니다. 다시 시도해주세요.');
       } catch (err) {
         console.error('Chat error:', err);
         setMessages((prev) =>
@@ -207,7 +225,7 @@ export default function Chatbot() {
             m.id === assistantId
               ? {
                   ...m,
-                  content: '죄송해요, 답변을 가져오지 못했어요. 잠시 후 다시 시도해주세요.',
+                  content: err instanceof Error ? err.message : '답변을 가져오지 못했어요.',
                   isStreaming: false,
                 }
               : m
@@ -475,11 +493,21 @@ export default function Chatbot() {
                           ✦ 관련 공지 {msg.posts.length}건
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {msg.posts.map((p) => (
-                            <MiniPostCard key={p.id} post={p} />
+                          {msg.posts.map((p, index) => (
+                            <MiniPostCard key={p.id} post={p} position={index + 1} />
                           ))}
                         </div>
                       </div>
+                    )}
+
+                    {msg.role === 'assistant' && Boolean(msg.evidence?.length) && (
+                      <details data-chat-evidence style={{ fontSize: 12, lineHeight: 1.6 }}>
+                        <summary style={{ cursor: 'pointer' }}>원문 근거 {msg.evidence!.length}개</summary>
+                        {msg.evidence!.map(e => <div key={e.ref} style={{ marginTop: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+                          <strong>[{e.ref}]</strong> {e.text_content}
+                          {e.url && /^https?:\/\//.test(e.url) && <div><a href={e.url} target="_blank" rel="noopener noreferrer">공지 원문</a></div>}
+                        </div>)}
+                      </details>
                     )}
 
                     {/* 메시지 본문 */}
@@ -503,7 +531,7 @@ export default function Chatbot() {
                               : '16px 16px 16px 4px',
                         }}
                       >
-                        {msg.content}
+                        {msg.role === 'assistant' ? <ChatAnswer content={msg.content} /> : msg.content}
                         {msg.isStreaming && !msg.content && (
                           <span style={{ display: 'inline-flex', gap: 4 }}>
                             <span
