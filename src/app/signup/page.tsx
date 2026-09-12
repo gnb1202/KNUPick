@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import BrandMark from '@/components/BrandMark';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function SignupPage() {
@@ -62,44 +63,41 @@ export default function SignupPage() {
 
   if (isComplete) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4">
+      <div className="min-h-screen flex items-center justify-center px-5 py-12">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
             <Link href="/" className="inline-block">
-              <h1 className="text-3xl font-bold">
-                <span className="text-[#033885]">KNU</span>
-                <span className="text-slate-800 dark:text-white">Pick</span>
-              </h1>
+              <h1 className="flex items-center justify-center gap-3 text-3xl font-extrabold tracking-tight text-[var(--text)]"><BrandMark size={42} /><span>KNUPICK</span></h1>
             </Link>
           </div>
 
-          <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-8 text-center">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-8 text-center">
             <div className="mx-auto mb-4 w-14 h-14 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
               <svg className="w-7 h-7 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">
+            <h2 className="text-xl font-bold text-[var(--text)] mb-2">
               회원가입이 완료되었습니다
             </h2>
-            <p className="text-slate-600 dark:text-slate-400 text-sm">
-              <span className="font-semibold text-[#033885]">{completedUsername}</span> 계정이 생성되었어요.
+            <p className="text-[var(--text-mute)] text-sm">
+              <span className="font-semibold text-[var(--accent)]">{completedUsername}</span> 계정이 생성되었어요.
             </p>
-            <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
+            <p className="text-[var(--text-dim)] text-sm mt-1">
               로그인 후 프로필을 설정하면 더 정확하게 추천해드려요.
             </p>
 
             <div className="mt-6 space-y-2">
               <Link
                 href="/"
-                className="block w-full py-3 bg-[#033885] text-white font-semibold rounded-xl
-                         hover:bg-[#022a66] transition-colors duration-200"
+                className="block w-full py-3 bg-[var(--action)] text-white font-semibold rounded-xl
+                         hover:bg-[var(--action-hover)] transition-colors duration-200"
               >
                 홈으로 돌아가기
               </Link>
               <Link
                 href="/login"
-                className="block w-full py-3 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold rounded-xl
+                className="block w-full py-3 bg-[var(--surface-2)] text-[var(--text)] font-semibold rounded-xl
                          hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors duration-200"
               >
                 로그인하러 가기
@@ -112,32 +110,29 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4">
+    <div className="min-h-screen flex items-center justify-center px-5 py-12">
       <div className="w-full max-w-md">
         {/* 로고 */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block">
-            <h1 className="text-3xl font-bold">
-              <span className="text-[#033885]">KNU</span>
-              <span className="text-slate-800 dark:text-white">Pick</span>
-            </h1>
+            <h1 className="flex items-center justify-center gap-3 text-3xl font-extrabold tracking-tight text-[var(--text)]"><BrandMark size={42} /><span>KNUPICK</span></h1>
           </Link>
-          <p className="text-slate-600 dark:text-slate-400 mt-2">
+          <p className="text-[var(--text-mute)] mt-2">
             회원가입하고 맞춤 정보를 받아보세요
           </p>
         </div>
 
         {/* 회원가입 폼 */}
-        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg p-6">
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-2xl p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
-              <div className="p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">
+              <div role="alert" className="p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg text-sm">
                 {error}
               </div>
             )}
 
             <div>
-              <label htmlFor="username" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="username" className="block text-sm font-medium text-[var(--text)] mb-1">
                 아이디
               </label>
               <input
@@ -146,16 +141,16 @@ export default function SignupPage() {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                         text-slate-900 dark:text-white placeholder-slate-400
-                         focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                         text-[var(--text)] placeholder:text-[var(--text-dim)]
+                         focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                          transition-all duration-200"
                 placeholder="영문, 숫자 4자 이상"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="password" className="block text-sm font-medium text-[var(--text)] mb-1">
                 비밀번호
               </label>
               <input
@@ -164,16 +159,16 @@ export default function SignupPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                         text-slate-900 dark:text-white placeholder-slate-400
-                         focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                         text-[var(--text)] placeholder:text-[var(--text-dim)]
+                         focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                          transition-all duration-200"
                 placeholder="6자 이상 입력"
               />
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-[var(--text)] mb-1">
                 비밀번호 확인
               </label>
               <input
@@ -182,9 +177,9 @@ export default function SignupPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 bg-slate-100 dark:bg-slate-700 rounded-xl
-                         text-slate-900 dark:text-white placeholder-slate-400
-                         focus:outline-none focus:ring-2 focus:ring-[#033885]/50
+                className="w-full px-4 py-2.5 bg-[var(--surface-2)] rounded-xl
+                         text-[var(--text)] placeholder:text-[var(--text-dim)]
+                         focus:outline-none focus:ring-2 focus:ring-[var(--accent)]
                          transition-all duration-200"
                 placeholder="비밀번호 다시 입력"
               />
@@ -193,8 +188,8 @@ export default function SignupPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 bg-[#033885] text-white font-semibold rounded-xl
-                       hover:bg-[#022a66] transition-colors duration-200
+              className="w-full py-3 bg-[var(--action)] text-white font-semibold rounded-xl
+                       hover:bg-[var(--action-hover)] transition-colors duration-200
                        disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? '가입 중...' : '회원가입'}
@@ -202,9 +197,9 @@ export default function SignupPage() {
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-slate-600 dark:text-slate-400 text-sm">
+            <p className="text-[var(--text-mute)] text-sm">
               이미 계정이 있으신가요?{' '}
-              <Link href="/login" className="text-[#033885] hover:underline font-medium">
+              <Link href="/login" className="text-[var(--accent)] hover:underline font-medium">
                 로그인
               </Link>
             </p>
@@ -213,7 +208,7 @@ export default function SignupPage() {
 
         {/* 홈으로 돌아가기 */}
         <div className="mt-6 text-center">
-          <Link href="/" className="text-slate-500 hover:text-[#033885] text-sm transition-colors">
+          <Link href="/" className="text-[var(--text-dim)] hover:text-[var(--accent)] text-sm transition-colors">
             ← 홈으로 돌아가기
           </Link>
         </div>

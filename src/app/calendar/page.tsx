@@ -69,7 +69,7 @@ export default function CalendarPage() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      <main
+      <main id="main-content"
         style={{
           maxWidth: 1240,
           margin: '0 auto',
@@ -118,6 +118,7 @@ export default function CalendarPage() {
           {/* 마감 표시 토글 */}
           <button
             onClick={() => setShowExpired(!showExpired)}
+            aria-pressed={showExpired}
             style={{
               all: 'unset',
               cursor: 'pointer',
@@ -140,7 +141,7 @@ export default function CalendarPage() {
                 width: 32,
                 height: 18,
                 borderRadius: 999,
-                background: showExpired ? 'var(--accent)' : 'var(--surface-2)',
+                background: showExpired ? 'var(--action)' : 'var(--surface-2)',
                 transition: 'background .15s',
               }}
             >
@@ -162,14 +163,7 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) 360px',
-            gap: 24,
-          }}
-          className="max-lg:grid-cols-1"
-        >
+        <div className="calendar-layout">
           {/* 캘린더 */}
           <div>
             {isLoading ? (
@@ -195,15 +189,13 @@ export default function CalendarPage() {
 
           {/* 선택된 날짜 패널 */}
           <aside
+            className="calendar-details"
             style={{
-              position: 'sticky',
-              top: 88,
               alignSelf: 'start',
               background: 'var(--surface)',
               border: '1px solid var(--border-soft)',
               borderRadius: 'var(--radius-lg)',
               padding: 20,
-              maxHeight: 'calc(100vh - 120px)',
               overflowY: 'auto',
             }}
           >
@@ -239,10 +231,10 @@ export default function CalendarPage() {
                             : '종료';
                       const typeBg =
                         item.type === 'deadline'
-                          ? '#FF5A4E'
+                          ? 'var(--hot-soft)'
                           : item.type === 'event_start'
-                            ? '#10B981'
-                            : '#94A3B8';
+                            ? 'var(--pick-soft)'
+                            : 'var(--surface-2)';
                       return (
                         <a
                           key={`${item.post.id}-${item.type}-${i}`}
@@ -267,7 +259,7 @@ export default function CalendarPage() {
                                 fontSize: 11,
                                 fontWeight: 700,
                                 background: typeBg,
-                                color: '#fff',
+                                color: item.type === 'deadline' ? 'var(--hot)' : item.type === 'event_start' ? 'var(--pick-text)' : 'var(--text-mute)',
                               }}
                             >
                               {typeLabel}
@@ -313,7 +305,7 @@ export default function CalendarPage() {
                   color: 'var(--text-mute)',
                 }}
               >
-                <div style={{ fontSize: 36, marginBottom: 8, opacity: 0.4 }}>📅</div>
+                <svg aria-hidden="true" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ margin: '0 auto 16px', color: 'var(--pick-text)' }}><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M3 10h18M8 2v6M16 2v6M8 14h3M8 17h7" /></svg>
                 <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>
                   날짜를 선택하세요
                 </div>

@@ -7,31 +7,29 @@ import "./globals.css";
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#3182F6" },
-    { media: "(prefers-color-scheme: dark)", color: "#0F1115" },
+    { media: "(prefers-color-scheme: light)", color: "#124B91" },
+    { media: "(prefers-color-scheme: dark)", color: "#101E2A" },
   ],
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
 };
 
 export const metadata: Metadata = {
-  title: "KNUPick | 공주대학교 대회/대외활동 매칭",
-  description: "공주대학교 학생을 위한 맞춤형 대회 및 대외활동 정보 매칭 서비스",
+  title: "KNUPICK | 당신을 위한 공지, 여기서 PICK",
+  description: "공주대학교 학생을 위한 공모전·장학금·대외활동 기회 모음",
   keywords: ["공주대학교", "대회", "대외활동", "공모전", "서포터즈", "취업"],
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "KNUPick",
+    title: "KNUPICK",
   },
   formatDetection: {
     telephone: false,
   },
   openGraph: {
-    title: "KNUPick | 공주대학교 대회/대외활동 매칭",
-    description: "공주대학교 학생을 위한 맞춤형 대회 및 대외활동 정보 매칭 서비스",
+    title: "KNUPICK | 당신을 위한 공지, 여기서 PICK",
+    description: "공주대학교 학생을 위한 공모전·장학금·대외활동 기회 모음",
     type: "website",
   },
   icons: {

@@ -116,7 +116,7 @@ export default function BookmarksPage() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <Header />
 
-      <main
+      <main id="main-content"
         style={{
           maxWidth: 1180,
           margin: '0 auto',
@@ -220,7 +220,7 @@ export default function BookmarksPage() {
                 cursor: 'pointer',
                 padding: '12px 24px',
                 borderRadius: 12,
-                background: 'var(--accent)',
+                background: 'var(--action)',
                 color: '#fff',
                 fontSize: 14,
                 fontWeight: 700,

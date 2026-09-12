@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { PostWithBookmark } from '@/types';
 import PostCard from './PostCard';
 import EmptyState from './EmptyState';
@@ -15,6 +15,7 @@ interface PostListProps {
   onBookmarkChange?: (postId: number, isBookmarked: boolean) => void;
   /** "lg:grid-cols-3" (default) or "lg:grid-cols-2" */
   columns?: 2 | 3;
+  onResetFilters?: () => void;
 }
 
 export default function PostList({
@@ -24,6 +25,7 @@ export default function PostList({
   userId,
   onBookmarkChange,
   columns = 3,
+  onResetFilters,
 }: PostListProps) {
   const filteredPosts = useMemo(() => {
     if (showExpired) return posts;
@@ -37,12 +39,12 @@ export default function PostList({
     });
   }, [posts, showExpired]);
 
-  const [currentPage, setCurrentPage] = useState(1);
-
-  // 검색·필터·만료 토글로 결과 모집단이 바뀌면 첫 페이지로 리셋
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [posts, showExpired]);
+  const [pagination, setPagination] = useState({ posts, showExpired, page: 1 });
+  if (pagination.posts !== posts || pagination.showExpired !== showExpired) {
+    setPagination({ posts, showExpired, page: 1 });
+  }
+  const currentPage =
+    pagination.posts === posts && pagination.showExpired === showExpired ? pagination.page : 1;
 
   const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -51,11 +53,11 @@ export default function PostList({
 
   const handlePageChange = (p: number) => {
     if (p < 1 || p > totalPages || p === safePage) return;
-    setCurrentPage(p);
+    setPagination({ posts, showExpired, page: p });
   };
 
   if (!isLoading && filteredPosts.length === 0) {
-    return <EmptyState />;
+    return <EmptyState onResetFilters={onResetFilters} />;
   }
 
   const gridClass =
@@ -70,7 +72,7 @@ export default function PostList({
           <PostCard
             key={post.id}
             post={post}
-            index={index}
+            index={pageStart + index}
             userId={userId}
             onBookmarkChange={onBookmarkChange}
           />
@@ -170,7 +172,15 @@ function Pagination({
         gap: 10,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+        }}
+      >
         {navBtn('‹', currentPage - 1, currentPage <= 1)}
         {items.map((it, idx) =>
           it === 'ellipsis' ? (
@@ -195,8 +205,9 @@ function Pagination({
                 minWidth: 36,
                 height: 36,
                 borderRadius: 'var(--radius-md, 10px)',
-                border: it === currentPage ? '1px solid var(--accent)' : '1px solid var(--border-soft)',
-                background: it === currentPage ? 'var(--accent)' : 'var(--surface)',
+                border:
+                  it === currentPage ? '1px solid var(--accent)' : '1px solid var(--border-soft)',
+                background: it === currentPage ? 'var(--action)' : 'var(--surface)',
                 color: it === currentPage ? '#fff' : 'var(--text)',
                 fontSize: 14,
                 fontWeight: it === currentPage ? 700 : 600,
@@ -211,7 +222,8 @@ function Pagination({
         {navBtn('›', currentPage + 1, currentPage >= totalPages)}
       </div>
       <div style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-        {totalCount.toLocaleString()}건 중 {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()}
+        {totalCount.toLocaleString()}건 중 {(pageStart + 1).toLocaleString()}–
+        {pageEnd.toLocaleString()}
       </div>
     </nav>
   );
@@ -233,9 +245,21 @@ function Skeleton() {
         <div style={{ height: 22, width: 70, background: 'var(--surface-2)', borderRadius: 999 }} />
         <div style={{ height: 22, width: 50, background: 'var(--surface-2)', borderRadius: 999 }} />
       </div>
-      <div style={{ height: 18, background: 'var(--surface-2)', borderRadius: 6, marginBottom: 8 }} />
-      <div style={{ height: 18, background: 'var(--surface-2)', borderRadius: 6, width: '70%', marginBottom: 14 }} />
-      <div style={{ height: 12, background: 'var(--surface-2)', borderRadius: 4, marginBottom: 6 }} />
+      <div
+        style={{ height: 18, background: 'var(--surface-2)', borderRadius: 6, marginBottom: 8 }}
+      />
+      <div
+        style={{
+          height: 18,
+          background: 'var(--surface-2)',
+          borderRadius: 6,
+          width: '70%',
+          marginBottom: 14,
+        }}
+      />
+      <div
+        style={{ height: 12, background: 'var(--surface-2)', borderRadius: 4, marginBottom: 6 }}
+      />
       <div style={{ height: 12, background: 'var(--surface-2)', borderRadius: 4, width: '85%' }} />
     </div>
   );

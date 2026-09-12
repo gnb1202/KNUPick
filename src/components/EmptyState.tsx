@@ -6,7 +6,7 @@ interface EmptyStateProps {
   onResetFilters?: () => void;
 }
 
-export default function EmptyState({}: EmptyStateProps) {
+export default function EmptyState({ onResetFilters }: EmptyStateProps) {
   const router = useRouter();
 
   return (
@@ -17,7 +17,7 @@ export default function EmptyState({}: EmptyStateProps) {
         color: 'var(--text-mute)',
       }}
     >
-      <div style={{ fontSize: 48, marginBottom: 12, opacity: 0.4 }}>🔍</div>
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true" style={{ margin: '0 auto 18px', color: 'var(--pick)' }}><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6"/></svg>
       <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
         조건에 맞는 공지가 없어요
       </div>
@@ -34,14 +34,14 @@ export default function EmptyState({}: EmptyStateProps) {
         }}
       >
         <button
-          onClick={() => router.push('/')}
+          onClick={() => onResetFilters ? onResetFilters() : router.push('/')}
           className="btn-press"
           style={{
             all: 'unset',
             cursor: 'pointer',
             padding: '8px 16px',
             borderRadius: 10,
-            background: 'var(--accent)',
+            background: 'var(--action)',
             color: '#fff',
             fontSize: 13,
             fontWeight: 700,
@@ -64,7 +64,7 @@ export default function EmptyState({}: EmptyStateProps) {
             fontWeight: 600,
           }}
         >
-          🏆 공모전
+          공모전
         </button>
         <button
           onClick={() => router.push('/?types=7')}
@@ -81,7 +81,7 @@ export default function EmptyState({}: EmptyStateProps) {
             fontWeight: 600,
           }}
         >
-          💰 장학금
+          장학금
         </button>
       </div>
     </div>
