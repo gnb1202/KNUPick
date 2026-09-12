@@ -1,5 +1,7 @@
-import { ACTIVITY_TYPES } from './constants';
+import { buildEmbeddingText } from './embedding-text';
+export { buildEmbeddingText } from './embedding-text';
 import { openai } from './openai';
+import { beginUsage, currentUsageMeter } from './usage-meter';
 import { env } from '@/env';
 
 // posts.embedding이 vector(1024)이고 HNSW 인덱스가 이 차원에 묶여 있다.
@@ -16,64 +18,6 @@ const OLLAMA_EMBED_MODEL = env.OLLAMA_EMBED_MODEL;
 export const EMBEDDING_MODEL_ID =
   PROVIDER === 'openai' ? OPENAI_EMBED_MODEL : OLLAMA_EMBED_MODEL;
 
-const CAMPUS_LABELS: Record<string, string> = {
-  common: '공통',
-  kongju: '공주(신관) 캠퍼스',
-  cheonan: '천안 캠퍼스',
-  yesan: '예산 캠퍼스',
-};
-
-interface EmbeddingSource {
-  title: string;
-  summary?: string | null;
-  content?: string | null;
-  keywords?: string[] | null;
-  activity_types?: number[] | null;
-  campus?: string | null;
-  deadline?: string | null;
-  event_start_date?: string | null;
-}
-
-export function buildEmbeddingText(post: EmbeddingSource): string {
-  const parts: string[] = [];
-
-  parts.push(`제목: ${post.title}`);
-
-  if (post.summary) {
-    parts.push(`요약: ${post.summary}`);
-  }
-
-  if (post.activity_types && post.activity_types.length > 0) {
-    const typeNames = post.activity_types
-      .map((id) => ACTIVITY_TYPES.find((t) => t.id === id)?.name)
-      .filter(Boolean)
-      .join(', ');
-    if (typeNames) parts.push(`활동유형: ${typeNames}`);
-  }
-
-  if (post.keywords && post.keywords.length > 0) {
-    parts.push(`키워드: ${post.keywords.join(', ')}`);
-  }
-
-  if (post.campus && CAMPUS_LABELS[post.campus]) {
-    parts.push(`캠퍼스: ${CAMPUS_LABELS[post.campus]}`);
-  }
-
-  if (post.deadline) {
-    parts.push(`마감일: ${post.deadline}`);
-  }
-
-  if (post.event_start_date) {
-    parts.push(`행사 시작일: ${post.event_start_date}`);
-  }
-
-  // 본문은 임베딩에 포함하지 않는다.
-  // 짧은 한국어 query와의 cosine similarity가 본문 길이만큼 dilute되어서,
-  // 제목/요약/키워드/활동유형/캠퍼스/마감일 만으로 의미 밀도를 높인다.
-
-  return parts.join('\n');
-}
-
 const MAX_RETRIES = 3;
 const RETRY_BASE_DELAY_MS = 500;
 
@@ -85,14 +29,16 @@ function isRetryable(error: unknown): boolean {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function openaiEmbed(inputs: string[]): Promise<(number[] | null)[]> {
+async function openaiEmbed(inputs: string[], signal?: AbortSignal): Promise<(number[] | null)[]> {
   for (let attempt = 0; ; attempt++) {
+    const usage = beginUsage('embedding', OPENAI_EMBED_MODEL);
     try {
       const res = await openai.embeddings.create({
         model: OPENAI_EMBED_MODEL,
         input: inputs,
         dimensions: EMBEDDING_DIMENSIONS,
-      });
+      }, { signal, timeout: 20_000, maxRetries: 0 });
+      usage?.observe(res.usage); usage?.finish();
       // 응답 순서가 요청 순서와 같다고 보장되지 않으므로 index로 되맞춘다.
       const byIndex = new Map(res.data.map((d) => [d.index, d.embedding]));
       return inputs.map((_, i) => byIndex.get(i) ?? null);
@@ -109,10 +55,12 @@ async function openaiEmbed(inputs: string[]): Promise<(number[] | null)[]> {
 }
 
 // Ollama /api/embed는 input에 string[] 도 받음 → 그대로 batch 처리
-async function ollamaEmbed(inputs: string[]): Promise<(number[] | null)[]> {
+async function ollamaEmbed(inputs: string[], signal?: AbortSignal): Promise<(number[] | null)[]> {
+  currentUsageMeter()?.unsupported();
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/embed`, {
       method: 'POST',
+      signal: signal ?? AbortSignal.timeout(20_000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, input: inputs }),
     });
@@ -129,19 +77,19 @@ async function ollamaEmbed(inputs: string[]): Promise<(number[] | null)[]> {
   }
 }
 
-export async function generateEmbedding(text: string): Promise<number[] | null> {
-  const [embedding] = await generateEmbeddingsBatch([text]);
+export async function generateEmbedding(text: string, signal?: AbortSignal): Promise<number[] | null> {
+  const [embedding] = await generateEmbeddingsBatch([text], signal);
   return embedding ?? null;
 }
 
 export async function generateEmbeddingsBatch(
-  texts: string[]
+  texts: string[], signal?: AbortSignal
 ): Promise<(number[] | null)[]> {
   if (texts.length === 0) return [];
-  return PROVIDER === 'openai' ? openaiEmbed(texts) : ollamaEmbed(texts);
+  return PROVIDER === 'openai' ? openaiEmbed(texts, signal) : ollamaEmbed(texts, signal);
 }
 
-export async function embedPost(post: EmbeddingSource): Promise<number[] | null> {
+export async function embedPost(post: Parameters<typeof buildEmbeddingText>[0]): Promise<number[] | null> {
   const text = buildEmbeddingText(post);
   return generateEmbedding(text);
 }

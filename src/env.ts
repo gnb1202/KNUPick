@@ -61,6 +61,8 @@ export const env = createEnv({
     // categorizer.ts의 키워드 폴백이 대신 처리한다.
     LLM_ENABLED: booleanFromString(false),
     CHAT_AGENTIC_RAG: booleanFromString(false),
+    CHAT_CONTEXT_SECRET: z.string().min(32).optional(),
+    EVALUATION_AS_OF: z.string().optional(),
 
     // CLOVA OCR (이미지 공지 분석 — 선택)
     CLOVA_OCR_URL: z.string().url().optional(),
@@ -89,6 +91,8 @@ export const env = createEnv({
     OLLAMA_EMBED_MODEL: process.env.OLLAMA_EMBED_MODEL,
     LLM_ENABLED: process.env.LLM_ENABLED,
     CHAT_AGENTIC_RAG: process.env.CHAT_AGENTIC_RAG,
+    CHAT_CONTEXT_SECRET: process.env.CHAT_CONTEXT_SECRET,
+    EVALUATION_AS_OF: process.env.EVALUATION_AS_OF,
     CLOVA_OCR_URL: process.env.CLOVA_OCR_URL,
     CLOVA_OCR_SECRET: process.env.CLOVA_OCR_SECRET,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,

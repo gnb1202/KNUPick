@@ -7,7 +7,10 @@
     "dev:restart": "taskkill /F /IM node.exe 2>nul & rmdir /s /q .next\\dev 2>nul & npm run dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test:chat-ui": "node scripts/test-chat-followup-ui.mjs"
   },
   "dependencies": {
     "@sparticuz/chromium": "^143.0.0",
@@ -27,6 +30,8 @@
     "zod": "^4.4.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pgvector": "0.0.9",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -36,6 +41,7 @@
     "puppeteer": "^24.32.1",
     "sharp": "^0.34.5",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "3.2.4"
   }
 }

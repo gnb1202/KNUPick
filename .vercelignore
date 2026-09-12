@@ -1,0 +1,7 @@
+.env*
+.mcp.json
+.claude/
+.git
+.next/
+node_modules/
+backups/
