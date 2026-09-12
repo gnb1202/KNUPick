@@ -41,6 +41,10 @@ const CAMPUS_LABELS: Record<string, string> = {
   yesan: '예산',
 };
 
+function campusScope(campus: string): string {
+  return `${campus === 'common' ? '전체 캠퍼스 공통 공지' : `${CAMPUS_LABELS[campus] || campus} 캠퍼스 분류`} (개최 장소 정보 아님)`;
+}
+
 function buildContextBlock(posts: SearchedPost[]): string {
   if (posts.length === 0) return '(검색된 관련 공지가 없습니다.)';
   return posts
@@ -52,7 +56,7 @@ function buildContextBlock(posts: SearchedPost[]): string {
       const lines = [
         `[#${i + 1}] ${p.title}`,
         `- ID: ${p.id}`,
-        `- 캠퍼스: ${CAMPUS_LABELS[p.campus] || p.campus}`,
+        `- 공지 대상 분류: ${campusScope(p.campus)}`,
         types && `- 활동유형: ${types}`,
         p.posted_date && `- 게시일: ${p.posted_date}`,
         p.deadline && `- 마감일: ${p.deadline}`,
@@ -108,7 +112,9 @@ function agenticSystemPrompt(today: string): string {
 - 전공·관심 분야·활동 목적을 말하며 볼 만한 공지를 묻는 것도 검색 요청이다. 공지 제목을 몰라도 검색을 시작하라.
 - 오타나 구어체는 문맥으로 이해하라. 이미 전공이나 주제를 말했으면 같은 정보를 다시 요구하지 마라.
 - 검색에는 사용자가 대화에서 직접 말한 조건만 사용하라. 저장 프로필을 추정하지 마라.
-- 전공은 관련 주제로 semantic_query에 사용한다. 학과에서 캠퍼스·학년·지원 자격·활동유형을 추정해 필터를 추가하지 마라.
+- 전공만 밝힌 탐색 요청은 학과명·학년·인사말을 검색어로 복사하지 말고, 관련 공지에 쓰일 대표 실무·학습 주제를 discovery_queries 최대 3개로 나누어 작성하라. 항목 하나에는 주제 하나만 쓰고, 서로 다른 주제를 한 검색어로 섞지 마라. semantic_query와 함께 쓰지 마라.
+- 사용자가 특정 주제·활동·공지명을 명시하면 그것을 우선 보존하고 다른 분야로 넓히지 마라. 학과에서 캠퍼스·학년·지원 자격·활동유형을 추정해 필터를 추가하지 마라.
+- 전공에서 풀어 쓴 주제는 관련 분야를 탐색하는 단서일 뿐이다. 해당 학생이 지원 가능하다거나 해당 학년 전용 공지라고 단정하지 마라. 지원 자격은 원문으로 별도 확인해야 한다.
 - 인사·감사·서비스 사용법 또는 정말 검색 단서가 없는 요청만 chat_guidance로 처리하라.
 - 검색할 단서가 있으면 먼저 관련 공지를 보여주고, 결과 설명 뒤에 관심 분야를 더 좁히는 질문을 할 수 있다.
 
@@ -170,57 +176,30 @@ User: "안녕"
 → chat_guidance({ reason: "greeting" })
 
 User: "컴퓨터공학부 학생인데 어떤 공지 보면 좋을까?"
-→ search_posts({ reasoning: "전공에 맞는 공지 탐색이며 제목이나 활동 종류가 없어도 검색 가능", semantic_query: "컴퓨터공학" })
+→ search_posts({ reasoning: "전공의 대표 주제별로 탐색하고 자격 조건은 추정하지 않음", discovery_queries: ["소프트웨어 개발", "인공지능", "데이터 분석"] })
 
 User: "경영학 전공인데 참여할 만한 거 있어?"
-→ search_posts({ reasoning: "사용자가 밝힌 전공과 관련된 공지 탐색", semantic_query: "경영학" })
+→ search_posts({ reasoning: "전공의 대표 주제별로 관련 공지를 탐색", discovery_queries: ["마케팅", "회계", "창업"] })
+
+User: "컴공인데 천안캠 인공지능 공모전 찾아줘"
+→ search_posts({ reasoning: "명시한 인공지능 주제와 공모전·천안캠 조건을 모두 유지", semantic_query: "인공지능", activity_types: [1], campus: "cheonan" })
 
 User: "나한테 맞는 거 추천해줘" (이전 대화에도 전공·주제 단서가 없음)
 → chat_guidance({ reason: "need_topic" })
 
-# 답변 형식 (3단계로 결정)
-
-도구 결과를 사용자 query와 비교해서 다음 3단계 중 하나로 답해라.
-
-## 단계 1 — 정확 매칭
-결과 제목·요약이 사용자 query의 핵심어와 직접 부합 (예: "공모전" query에 실제 공모전들).
-\`\`\`
-짧은 인트로 한 문장. (검색 의도 + 결과 개수 + 정렬 기준)
-
-• [#1] 제목 — 마감 M/D 또는 시작 M/D
-• [#2] 제목 — 마감 M/D
-• ...
-
-자세한 내용은 카드를 눌러보세요.
-\`\`\`
-
-## 단계 2 — 부분 매칭
-결과가 같은 카테고리이지만 정확 매칭은 아님 (예: "근로장학 자리" query에 멘토·등록금 지원 같은 [7] 카테고리 변형). 정직하게 짚되 비슷한 분야로 안내.
-\`\`\`
-'X'에 정확히 맞는 공지는 못 찾았지만, 비슷한 분야로 N건 찾았어요:
-
-• [#1] 제목 — 마감 M/D
-• [#2] 제목 — 마감 M/D
-• ...
-
-자세한 내용은 카드를 눌러보세요.
-\`\`\`
-
-## 단계 3 — 완전 무관 또는 0건
-결과가 query와 의미적으로 완전히 동떨어지거나 0건 (예: "IT 인턴십" query에 강의평가가 떴다).
-\`\`\`
-관련 공지를 찾지 못했어요. (한 문장으로 비슷한 분야 제안 가능)
-\`\`\`
-
-판단은 결과의 제목·요약을 사용자 입장에서 봤을 때 "도움이 되는지" 기준으로. 의심스러우면 단계 2로.
-
-# 답변 규칙 (위반 금지)
-
-1. **마크다운·링크 절대 금지.** [텍스트](url) 형식 사용 금지. 추천은 오직 [#1] [#2] 같은 카드 번호로만 (UI가 자동으로 카드를 보여줌).
-2. **불릿 기호는 ASCII '•' 또는 '-'만.** 마크다운 *, ** 굵은 글씨 금지.
-3. 마감일/시작일 명시. 형식: "5/16 마감" 또는 "시작 5/20".
-4. 사용자 톤(친근/정중)에 맞춰서.`;
+`;
 }
+
+const AGENTIC_ANSWER_SYSTEM_PROMPT = `${VANILLA_SYSTEM_PROMPT}
+
+검색 결과 설명:
+- 검색 결과가 있으면 먼저 어떤 분야의 공지를 찾았는지 말하고, 카드 번호 [#1] 등으로 연결하라. 제목만 나열하지 말고 제목·요약에 있는 활동 내용으로 질문과의 연관성을 짧게 설명하라.
+- 사용자의 전공·학년은 질문 맥락이다. 관련 분야 검색만으로 "4학년에게 적합", "해당 전공 학생이 지원 가능"처럼 자격이나 학년 적합성을 단정하지 마라. 검색 결과로 확인한 분야 연관성만 설명하라.
+- 지원 자격을 확인하지 못했다면 확인하지 못했다고 말하라. 필요하면 카드 번호로 지원 조건을 물어볼 수 있다고 안내하라. 검색 결과가 있다는 사실과 자격 확인은 다르다.
+- 같은 행사의 중복 공지는 서로 다른 기회인 것처럼 소개하지 말고 같은 행사임을 짚어라.
+- 카드에 없는 지원 조건·마감 시각·추천 점수는 만들지 마라.
+- 공지 대상 분류의 '공통'은 여러 캠퍼스에 해당하는 공지라는 뜻이다. 행사 장소가 아니다. '공통 캠퍼스에서 진행'처럼 개최 장소로 바꾸지 마라.
+`;
 
 const GUIDANCE_MESSAGES = {
   greeting: '안녕하세요! 전공이나 관심 분야를 알려주시면 관련 공지를 찾아드릴게요.',
@@ -398,7 +377,6 @@ async function handleAgenticRAG(
   previousContextToken?: string
 ): Promise<Response> {
   const planningRequest = agenticPlanningRequest(messages, todayKST());
-  const baseMessages = planningRequest.messages;
 
   // 1차: tool call 결정
   const planStarted = Date.now();
@@ -449,7 +427,8 @@ async function handleAgenticRAG(
     max_tokens: 1200,
     temperature: 0.3,
     messages: [
-      ...baseMessages.filter(m => m.role !== 'assistant'),
+      { role: 'system', content: `${AGENTIC_ANSWER_SYSTEM_PROMPT}\n오늘 날짜: ${todayKST()}` },
+      ...messages.filter(m => m.role === 'user'),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       firstMessage as any,
       {
@@ -461,7 +440,7 @@ async function handleAgenticRAG(
             id: p.id,
             title: p.title,
             summary: p.summary,
-            campus: CAMPUS_LABELS[p.campus] || p.campus,
+            campus_scope: campusScope(p.campus),
             activity_types: p.activity_types
               .map((id) => ACTIVITY_TYPES.find((t) => t.id === id)?.name)
               .filter(Boolean),

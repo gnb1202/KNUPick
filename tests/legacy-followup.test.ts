@@ -62,16 +62,20 @@ it('does not publish the recorded fabricated dates from a no-tool completion', a
 
 it('requires an explicit search or guidance action for the reported major-based discovery request', async () => {
   const content = '나 컴퓨터공학부 학생인데 어떤 공지 가보는게 좋으려ㅓ나';
-  mocks.create.mockResolvedValueOnce(toolResult('search_posts', { reasoning: '전공에 관련된 공지 탐색', semantic_query: '컴퓨터공학' }));
+  mocks.create.mockResolvedValueOnce(toolResult('search_posts', { reasoning: '전공에 관련된 공지 탐색', discovery_queries: ['소프트웨어 개발', '인공지능', '데이터 분석'] }));
   mocks.search.mockResolvedValue([{ ...post, title: '소프트웨어 개발 교육 모집', activity_types: [6] }]);
   mocks.create.mockResolvedValueOnce((async function* () { yield { choices: [{ delta: { content: '컴퓨터공학 관심 분야와 관련된 교육 공지를 찾았어요. [#1]' } }] }; })());
   const rows = await events(await POST(request(content, undefined, false)));
   expect(mocks.create.mock.calls[0][0]).toMatchObject({ tool_choice: 'required', parallel_tool_calls: false });
   expect(mocks.create.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
-  expect(mocks.search).toHaveBeenCalledWith(expect.objectContaining({ semantic_query: '컴퓨터공학' }), content);
+  expect(mocks.search).toHaveBeenCalledWith(expect.objectContaining({ discovery_queries: ['소프트웨어 개발', '인공지능', '데이터 분석'] }), content);
   expect(rows[0].posts[0].title).toBe('소프트웨어 개발 교육 모집');
   expect(answer(rows)).not.toContain('이름이나 주제를 알려주세요');
   expect(mocks.create).toHaveBeenCalledTimes(2);
+  const toolMessage = mocks.create.mock.calls[1][0].messages.at(-1);
+  const answerPost = JSON.parse(toolMessage.content).posts[0];
+  expect(answerPost.campus_scope).toBe('전체 캠퍼스 공통 공지 (개최 장소 정보 아님)');
+  expect(answerPost).not.toHaveProperty('campus');
 });
 
 it.each(['greeting', 'need_topic', 'capabilities', 'acknowledgement', 'out_of_scope'])('uses only server guidance for explicit action %s', async reason => {

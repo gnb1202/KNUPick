@@ -1,11 +1,11 @@
 import { chatDate } from '../chat-clock';
 import { supabaseAdmin } from '../supabase';
-import { generateEmbedding, EMBEDDING_MODEL_ID, EMBEDDING_DIMENSIONS } from '../embeddings';
+import { generateEmbedding, generateEmbeddingsBatch, EMBEDDING_MODEL_ID, EMBEDDING_DIMENSIONS } from '../embeddings';
 import { OPENAI_CONFIG } from '../openai';
 import { queryTrace, traceChat } from './chat-trace';
 
 export class PostSearchError extends Error {
-  constructor(readonly code: 'DATABASE_UNAVAILABLE' | 'EMBEDDING_FAILED' | 'VECTOR_LOOKUP_FAILED' | 'FILTER_LOOKUP_FAILED') {
+  constructor(readonly code: 'DATABASE_UNAVAILABLE' | 'EMBEDDING_FAILED' | 'VECTOR_LOOKUP_FAILED' | 'FILTER_LOOKUP_FAILED' | 'INVALID_SEARCH_PLAN') {
     super(code);
   }
 }
@@ -16,6 +16,7 @@ export interface SearchPostsArgs {
   deadline_to?: string;
   campus?: 'kongju' | 'cheonan' | 'yesan';
   semantic_query?: string;
+  discovery_queries?: string[];
   include_expired?: boolean;
   limit?: number;
 }
@@ -70,6 +71,12 @@ function sanitizeArgs(args: SearchPostsArgs): SearchPostsArgs {
   if (typeof args.semantic_query === 'string' && args.semantic_query.trim()) {
     clean.semantic_query = args.semantic_query.trim();
   }
+  if (args.discovery_queries !== undefined) {
+    if (!Array.isArray(args.discovery_queries) || args.discovery_queries.length < 1 || args.discovery_queries.length > 3 ||
+        args.discovery_queries.some(query => typeof query !== 'string' || !query.trim() || query.trim().length > 80) || clean.semantic_query)
+      throw new PostSearchError('INVALID_SEARCH_PLAN');
+    clean.discovery_queries = [...new Set(args.discovery_queries.map(query => query.trim()))];
+  }
   if (typeof args.include_expired === 'boolean') clean.include_expired = args.include_expired;
   if (Number.isInteger(args.limit) && args.limit! > 0 && args.limit! <= 20)
     clean.limit = args.limit;
@@ -79,17 +86,29 @@ function sanitizeArgs(args: SearchPostsArgs): SearchPostsArgs {
 async function embeddingSearch(
   text: string,
   limit: number,
-  includeExpired = false
+  args: SearchPostsArgs,
+  filtered = false
 ): Promise<SearchedPost[]> {
   if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
   const emb = await generateEmbedding(text);
   if (!emb) throw new PostSearchError('EMBEDDING_FAILED');
-  const { data, error } = await supabaseAdmin.rpc('legacy_match_posts_at', {
+  return matchEmbedding(emb, limit, args, filtered);
+}
+
+async function matchEmbedding(emb: number[], limit: number, args: SearchPostsArgs, filtered: boolean): Promise<SearchedPost[]> {
+  if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
+  const { data, error } = await supabaseAdmin.rpc(filtered ? 'legacy_match_posts_filtered_at' : 'legacy_match_posts_at', {
     as_of: chatDate(),
     query_embedding: emb,
     match_threshold: OPENAI_CONFIG.SIMILARITY_THRESHOLD,
     match_count: limit,
-    include_expired: includeExpired,
+    include_expired: args.include_expired ?? false,
+    ...(filtered ? {
+      filter_activity_types: args.activity_types ?? null,
+      filter_campus: args.campus ?? null,
+      filter_deadline_from: args.deadline_from ?? null,
+      filter_deadline_to: args.deadline_to ?? null,
+    } : {}),
   });
   if (error) {
     throw new PostSearchError('VECTOR_LOOKUP_FAILED');
@@ -98,6 +117,24 @@ async function embeddingSearch(
     ...r.post,
     similarity: r.similarity,
   }));
+}
+
+// Equal-weight RRF (k=60). No below-cutoff padding; duplicate IDs use one card.
+export function mergeDiscoveryResults(lists: SearchedPost[][], limit: number): SearchedPost[] {
+  const merged = new Map<number, { post: SearchedPost; score: number }>();
+  for (const list of lists) {
+    const seen = new Set<number>();
+    for (const [rank, post] of list.entries()) {
+      if (seen.has(post.id)) continue;
+      seen.add(post.id);
+      const entry = merged.get(post.id) ?? { post, score: 0 };
+      entry.score += 1 / (60 + rank + 1);
+      if ((post.similarity ?? -1) > (entry.post.similarity ?? -1)) entry.post = post;
+      merged.set(post.id, entry);
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.score - a.score ||
+    (b.post.similarity ?? -1) - (a.post.similarity ?? -1) || a.post.id - b.post.id).slice(0, limit).map(entry => entry.post);
 }
 
 export async function searchPosts(
@@ -113,15 +150,19 @@ export async function searchPosts(
     args.campus
   );
   const hasSemantic = !!args.semantic_query;
-  const path = hasFilters ? 'filter' : hasSemantic ? 'semantic' : 'fallback';
-  const { semantic_query, ...filters } = args;
+  const hasDiscovery = !!args.discovery_queries?.length;
+  const path = hasDiscovery ? hasFilters ? 'filtered_discovery' : 'discovery'
+    : hasFilters ? hasSemantic ? 'filtered_semantic' : 'filter' : hasSemantic ? 'semantic' : 'fallback';
+  const usesEmbedding = hasDiscovery || hasSemantic || !hasFilters;
+  const { semantic_query, discovery_queries, ...filters } = args;
   const started = Date.now();
   traceChat('search_start', {
-    path, ...queryTrace(semantic_query ?? (hasFilters ? '' : fallbackQuery)),
-    semanticApplied: !hasFilters,
+    path, ...queryTrace(discovery_queries ? JSON.stringify(discovery_queries) : semantic_query ?? (hasFilters ? '' : fallbackQuery)),
+    queryCount: discovery_queries?.length ?? (usesEmbedding ? 1 : 0),
+    semanticApplied: usesEmbedding,
     filters: { ...filters, include_expired: args.include_expired ?? false, limit },
-    asOf: todayKST(), threshold: hasFilters ? undefined : OPENAI_CONFIG.SIMILARITY_THRESHOLD,
-    model: hasFilters ? undefined : EMBEDDING_MODEL_ID, dimensions: hasFilters ? undefined : EMBEDDING_DIMENSIONS,
+    asOf: todayKST(), threshold: usesEmbedding ? OPENAI_CONFIG.SIMILARITY_THRESHOLD : undefined,
+    model: usesEmbedding ? EMBEDDING_MODEL_ID : undefined, dimensions: usesEmbedding ? EMBEDDING_DIMENSIONS : undefined,
   });
   try {
     const posts = await executeSearch(args, fallbackQuery, hasFilters, hasSemantic, limit);
@@ -140,17 +181,24 @@ export async function searchPosts(
 async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFilters: boolean, hasSemantic: boolean, limit: number): Promise<SearchedPost[]> {
   if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
 
+  if (args.discovery_queries?.length) {
+    const embeddings = await generateEmbeddingsBatch(args.discovery_queries);
+    if (embeddings.length !== args.discovery_queries.length || embeddings.some(embedding => !embedding)) throw new PostSearchError('EMBEDDING_FAILED');
+    const lists = await Promise.all(embeddings.map(embedding => matchEmbedding(embedding!, 20, args, hasFilters)));
+    return mergeDiscoveryResults(lists, limit);
+  }
+
   // Case A: 빈 인자 → 마지막 user message로 임베딩 fallback
   if (!hasFilters && !hasSemantic) {
-    return embeddingSearch(fallbackQuery, limit, args.include_expired);
+    return embeddingSearch(fallbackQuery, limit, args);
   }
 
-  // Case B: semantic only → 기존 match_posts RPC
-  if (hasSemantic && !hasFilters) {
-    return embeddingSearch(args.semantic_query!, limit, args.include_expired);
+  // Case B: topic search, with metadata conditions applied inside the RPC.
+  if (hasSemantic) {
+    return embeddingSearch(args.semantic_query!, limit, args, hasFilters);
   }
 
-  // Case C: 필터 (또는 필터 + semantic) → supabase builder
+  // Case C: metadata-only search keeps its existing date ordering.
   let query = supabaseAdmin.from('posts').select(POST_COLUMNS);
 
   if (args.activity_types?.length) query = query.overlaps('activity_types', args.activity_types);
@@ -174,7 +222,6 @@ async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFi
   if (error) {
     throw new PostSearchError('FILTER_LOOKUP_FAILED');
   }
-  // MVP: filter+semantic 결합 시 reranking 생략. SQL 정렬을 신뢰.
   return ((data as SearchedPost[]) ?? []).slice(0, limit);
 }
 
@@ -245,9 +292,16 @@ export const SEARCH_POSTS_TOOL = {
         semantic_query: {
           type: 'string',
           description:
-            '고유명사·자유 표현 임베딩 검색용. 예: "통일 모의 국무회의", "AIVLE 캠프", "K-공유대학". ' +
+            '고유명사·주제의 의미 검색용. 필터와 함께 사용하면 모든 필터 안에서 이 주제로 검색한다. ' +
+            '정확한 공지명·명시한 관심 분야는 보존한다. 전공만 밝힌 탐색 요청은 discovery_queries를 사용한다. 두 필드는 함께 넣지 마라. ' +
+            '예: "통일 모의 국무회의", "AIVLE 캠프", "K-공유대학". ' +
             '활동유형 필터로 좁힐 수 없는 주제어가 있을 때만. 일반 카테고리어("공모전", "장학금")는 ' +
             'semantic_query에 넣지 말고 activity_types로 풀어라.',
+        },
+        discovery_queries: {
+          type: 'array', minItems: 1, maxItems: 3,
+          items: { type: 'string', minLength: 1, maxLength: 80 },
+          description: '전공만 밝히고 볼 만한 공지를 묻는 넓은 탐색에만 사용. 대표 실무·학습 주제를 최대 3개로 나누고 항목 하나에 주제 하나만 적는다. 서로 다른 분야를 한 항목에 섞지 마라. semantic_query와 함께 쓰지 마라. 명시한 주제·공지명 검색을 넓히는 데 쓰지 마라. 지원 자격을 뜻하지 않는다.',
         },
         include_expired: {
           type: 'boolean',

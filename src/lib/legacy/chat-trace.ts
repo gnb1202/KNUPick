@@ -14,7 +14,8 @@ export function traceChat(event: 'request' | 'response' | 'plan' | 'search_start
   reason?: string;
   outcome?: 'success' | 'empty' | 'error';
   errorCode?: string;
-  path?: 'fallback' | 'semantic' | 'filter';
+  path?: 'fallback' | 'semantic' | 'filter' | 'filtered_semantic' | 'discovery' | 'filtered_discovery';
+  queryCount?: number;
   queryChars?: number;
   querySha256?: string;
   semanticApplied?: boolean;
