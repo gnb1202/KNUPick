@@ -36,6 +36,9 @@ const request = (content: string, contextToken?: string, history = true) => new 
 const events = async (response: Response) => (await response.text()).trim().split('\n\n').map(line => JSON.parse(line.slice(6)));
 const answer = (rows: { type: string; delta?: string }[]) => rows.filter(row => row.type === 'text').map(row => row.delta).join('');
 const completion = (content: string) => ({ choices: [{ finish_reason: 'stop', message: { content } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } });
+const toolResult = (name: string, args: unknown) => ({ choices: [{ finish_reason: 'tool_calls', message: {
+  role: 'assistant', content: null, tool_calls: [{ id: 'tool', type: 'function', function: { name, arguments: JSON.stringify(args) } }],
+} }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } });
 let query: { select: ReturnType<typeof vi.fn>; eq: ReturnType<typeof vi.fn>; abortSignal: ReturnType<typeof vi.fn>; maybeSingle: ReturnType<typeof vi.fn> };
 beforeEach(() => {
   vi.resetAllMocks();
@@ -52,7 +55,43 @@ it('does not publish the recorded fabricated dates from a no-tool completion', a
   const rows = await events(await POST(request('접수 마감은 언제야?', undefined, false)));
   expect(answer(rows)).not.toContain('오후 3시');
   expect(answer(rows)).not.toContain('오후 6시');
-  expect(answer(rows)).toContain('검색');
+  expect(rows.at(-1)).toMatchObject({ type: 'error', code: 'SEARCH_PLAN_FAILED' });
+  expect(mocks.search).not.toHaveBeenCalled();
+});
+
+it('requires an explicit search or guidance action for the reported major-based discovery request', async () => {
+  const content = '나 컴퓨터공학부 학생인데 어떤 공지 가보는게 좋으려ㅓ나';
+  mocks.create.mockResolvedValueOnce(toolResult('search_posts', { reasoning: '전공에 관련된 공지 탐색', semantic_query: '컴퓨터공학' }));
+  mocks.search.mockResolvedValue([{ ...post, title: '소프트웨어 개발 교육 모집', activity_types: [6] }]);
+  mocks.create.mockResolvedValueOnce((async function* () { yield { choices: [{ delta: { content: '컴퓨터공학 관심 분야와 관련된 교육 공지를 찾았어요. [#1]' } }] }; })());
+  const rows = await events(await POST(request(content, undefined, false)));
+  expect(mocks.create.mock.calls[0][0]).toMatchObject({ tool_choice: 'required', parallel_tool_calls: false });
+  expect(mocks.create.mock.calls[0][0].messages.at(-1)).toEqual({ role: 'user', content });
+  expect(mocks.search).toHaveBeenCalledWith(expect.objectContaining({ semantic_query: '컴퓨터공학' }), content);
+  expect(rows[0].posts[0].title).toBe('소프트웨어 개발 교육 모집');
+  expect(answer(rows)).not.toContain('이름이나 주제를 알려주세요');
+  expect(mocks.create).toHaveBeenCalledTimes(2);
+});
+
+it.each(['greeting', 'need_topic', 'capabilities', 'acknowledgement', 'out_of_scope'])('uses only server guidance for explicit action %s', async reason => {
+  mocks.create.mockResolvedValueOnce(toolResult('chat_guidance', { reason }));
+  const contextToken = token();
+  const rows = await events(await POST(request('도와줘', contextToken, false)));
+  expect(rows.at(-1)).toMatchObject({ type: 'done', contextToken });
+  expect(answer(rows)).not.toContain('오후 3시');
+  expect(mocks.search).not.toHaveBeenCalled();
+  expect(mocks.create).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['unknown_tool', {}], ['chat_guidance', { reason: 'invented' }],
+  ['chat_guidance', { reason: 'need_topic', answer: wrong }], ['search_posts', []],
+])('rejects an invalid action %s without relaxing it into a search', async (name, args) => {
+  mocks.create.mockResolvedValueOnce(toolResult(name as string, args));
+  const rows = await events(await POST(request('컴공인데 공지 추천해줘', undefined, false)));
+  expect(rows.at(-1)).toMatchObject({ type: 'error', code: 'SEARCH_PLAN_FAILED' });
+  expect(mocks.search).not.toHaveBeenCalled();
+  expect(answer(rows)).not.toContain('오후 3시');
 });
 
 it('does not use assistant history as notice evidence when signed context is missing', async () => {
@@ -184,7 +223,7 @@ it.each([true, false])('issues signed card order on ordinary search in agentic=%
   const stream = async function* () { yield { choices: [{ delta: { content: '공지 두 건을 찾았어요.' } }] }; };
   if (agentic) {
     mocks.search.mockResolvedValue(posts);
-    mocks.create.mockResolvedValueOnce({ choices: [{ message: { tool_calls: [{ id: 'tool', function: { arguments: '{}' } }] } }] });
+    mocks.create.mockResolvedValueOnce(toolResult('search_posts', {}));
   } else mocks.rpc.mockResolvedValue({ data: posts.map(post => ({ post, similarity: 0.5 })), error: null });
   mocks.create.mockResolvedValueOnce(stream());
   const response = await POST(request('교환학생 선발 공지 찾아줘', undefined, false));
@@ -195,7 +234,8 @@ it.each([true, false])('issues signed card order on ordinary search in agentic=%
 
 it('keeps legacy search usable without a secret but refuses unsigned references', async () => {
   mocks.env.CHAT_CONTEXT_SECRET = undefined;
-  expect(answer(await events(await POST(request('안녕', undefined, false))))).toContain('공지 검색');
+  mocks.create.mockResolvedValueOnce(toolResult('chat_guidance', { reason: 'greeting' }));
+  expect(answer(await events(await POST(request('안녕', undefined, false))))).toContain('관련 공지를 찾아드릴게요');
   const rows = await events(await POST(request(question)));
   expect(answer(rows)).toContain('다시 검색');
   expect(mocks.create).toHaveBeenCalledTimes(1);
@@ -235,8 +275,9 @@ it('preserves both application dates in the captured OCR while keeping office ho
     expect(actual.content.slice(e.start_offset, e.end_offset)).toBe(e.text_content);
 });
 
-it('preserves the signed card context across no-tool guidance', async () => {
+it('preserves the signed card context across explicit acknowledgement', async () => {
   const contextToken = token();
+  mocks.create.mockResolvedValueOnce(toolResult('chat_guidance', { reason: 'acknowledgement' }));
   const rows = await events(await POST(request('고마워', contextToken)));
   expect(rows.at(-1).contextToken).toBe(contextToken);
 });
