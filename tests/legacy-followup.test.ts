@@ -19,6 +19,7 @@ import { followupEvidence, followupRequest, renderFollowup } from '@/lib/legacy/
 import { withUsageMeter } from '@/lib/usage-meter';
 import { withChatTrace } from '@/lib/legacy/chat-trace';
 import exchangeSource from './fixtures/legacy-exchange-source.json';
+import searchSources from './fixtures/legacy-search-sources.json';
 
 const wrong = '이메일 접수 마감은 2026년 10월 11일 오후 3시까지이며, 실물 서류 제출 마감은 2026년 10월 11일 오후 6시까지입니다.';
 const question = '그 공지의 이메일 접수와 실물서류 제출 마감은 각각 언제야?';
@@ -76,6 +77,49 @@ it('requires an explicit search or guidance action for the reported major-based 
   const answerPost = JSON.parse(toolMessage.content).posts[0];
   expect(answerPost.campus_scope).toBe('전체 캠퍼스 공통 공지 (개최 장소 정보 아님)');
   expect(answerPost).not.toHaveProperty('campus');
+});
+
+it.each([true,false])('passes original conditions and the same displayed evidence to the first answer in agentic=%s', async agentic => {
+  mocks.config.AGENTIC_RAG_ENABLED=agentic;
+  mocks.search.mockResolvedValue(searchSources);
+  if(agentic) mocks.create.mockResolvedValueOnce(toolResult('search_posts',{semantic_query:'인공지능'}));
+  mocks.create.mockResolvedValueOnce((async function*(){yield {choices:[{delta:{content:'원문 조건을 확인해주세요. [E1]'}}]};})());
+  const rows=await events(await POST(request('컴공 학생인데 교육 공지 추천해줘',undefined,false)));
+  expect(rows.slice(0,3).map(row=>row.type)).toEqual(['posts','evidence','text']);
+  const source=rows[1].evidence.map((e:{text_content:string})=>e.text_content).join('\n');
+  expect(source).toContain('경기도내 거주 또는 경기도내 소재한 대학(원)');
+  expect(source).toContain('현재 4학년');
+  const sent=JSON.stringify(mocks.create.mock.calls.at(-1)![0].messages);
+  expect(sent).toContain('경기도내 거주 또는 경기도내 소재한 대학(원)');
+  expect(sent).not.toContain(searchSources[0].summary);
+  expect(rows.at(-1).type).toBe('done');
+  expect(rows[0].posts.every((p:object)=>!('content' in p))).toBe(true);
+});
+
+it('makes cards and evidence readable while the answer provider is still connecting', async () => {
+  mocks.config.AGENTIC_RAG_ENABLED=false;
+  mocks.search.mockResolvedValue(searchSources);
+  let release!: (value: unknown)=>void;
+  mocks.create.mockReturnValueOnce(new Promise(resolve=>{release=resolve;}));
+  const response=await POST(request('교육 공지 찾아줘',undefined,false));
+  const reader=response.body!.getReader();
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain('"type":"posts"');
+  expect(new TextDecoder().decode((await reader.read()).value)).toContain('"type":"evidence"');
+  release((async function*(){yield {choices:[{delta:{content:'연결 완료'}}]};})());
+  let rest='';
+  for(;;){const next=await reader.read();if(next.done)break;rest+=new TextDecoder().decode(next.value);}
+  expect(rest).toContain('"type":"done"');
+});
+
+it.each(['connect','partial'])('returns a terminal error and retains evidence if the answer fails during %s', async stage => {
+  mocks.config.AGENTIC_RAG_ENABLED=false;
+  mocks.search.mockResolvedValue(searchSources);
+  if(stage==='connect')mocks.create.mockRejectedValueOnce(new Error('provider unavailable'));
+  else mocks.create.mockResolvedValueOnce((async function*(){yield {choices:[{delta:{content:'부분 답변'}}]};throw new Error('connection lost');})());
+  const rows=await events(await POST(request('교육 공지 찾아줘',undefined,false)));
+  expect(rows.slice(0,2).map(row=>row.type)).toEqual(['posts','evidence']);
+  expect(rows.at(-1)).toMatchObject({type:'error',code:'ANSWER_FAILED',message:expect.stringContaining('답변 생성 중 오류')});
+  expect(rows.some(row=>row.type==='done')).toBe(false);
 });
 
 it.each(['greeting', 'need_topic', 'capabilities', 'acknowledgement', 'out_of_scope'])('uses only server guidance for explicit action %s', async reason => {

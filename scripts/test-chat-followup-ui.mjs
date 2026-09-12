@@ -12,6 +12,9 @@ const evidence = { ref: 'E1', post_id: 772, source_key: 'body', kind: 'body', ur
   text_content: source, start_offset: 0, end_offset: source.length };
 const sse = events => events.map(event => 'data: ' + JSON.stringify(event) + '\n\n').join('');
 const requests = [], errors = [], externalRequests = [];
+const searchError = '공지 검색 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.';
+const planError = '요청을 검색 조건으로 처리하지 못했어요. 잠시 후 다시 시도해주세요.';
+const answerError = '답변 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.';
 const browser = await puppeteer.launch({ headless: true });
 try {
   const page = await browser.newPage();
@@ -44,7 +47,12 @@ try {
       ] : index === 3 ? [
         { type: 'posts', posts: [post] }, { type: 'text', delta: '새 공지 검색 완료' },
         { type: 'done', contextToken: 'signed-recovery' },
-      ] : [
+      ] : index === 6 ? [{ type:'error',code:'SEARCH_FAILED',message:searchError }]
+      : index === 7 ? [{ type:'error',code:'SEARCH_PLAN_FAILED',message:planError }]
+      : index === 8 ? [{ type:'posts',posts:[post] },{ type:'evidence',evidence:[evidence] },
+        { type:'text',delta:'참가 대상은' },{ type:'error',code:'ANSWER_FAILED',message:answerError }]
+      : index === 9 ? [{ type:'text',delta:'오류 후 복구 완료' },{ type:'done' }]
+      : [
         { type: 'posts', posts: [] }, { type: 'text', delta: '새 검색 준비 완료' }, { type: 'done' },
       ];
       await request.respond({ status: 200, contentType: 'text/event-stream', body: sse(events) }); return;
@@ -73,7 +81,7 @@ try {
   assert.equal(await page.evaluate(() => window.sourceExecuted), undefined);
   assert.equal(await page.$$eval('[data-chat-evidence] script', elements => elements.length), 0);
   assert.ok(await page.$eval('[data-chat-evidence]', element => element.textContent.includes('<script>window.sourceExecuted=true</script>')));
-  await page.screenshot({ path: '../chat-followup-desktop.png' });
+  await page.screenshot({ path: '../quality-chat-followup-desktop.png' });
   await send('다른 공지 검색해줘', '답변 연결이 중단되었습니다. 다시 시도해주세요.');
   assert.equal(requests[2].contextToken, 'signed-followup');
   await send('새 공지 검색', '새 공지 검색 완료');
@@ -82,10 +90,24 @@ try {
   assert.equal(requests[4].contextToken, 'signed-recovery');
   await send('새 검색', '새 검색 준비 완료');
   assert.equal(requests[5].contextToken, undefined);
+  await send('검색 실패 확인',searchError);
+  assert.ok(await page.$eval('[data-chat-error]',element=>element.textContent.length>0));
+  await send('계획 실패 확인',planError);
+  await send('응답 중단 확인',answerError);
+  assert.ok(await page.evaluate(()=>document.body.innerText.includes('답변이 중단되어 아래 내용은 일부만 표시됩니다.')));
+  assert.ok(await page.evaluate(()=>document.body.innerText.includes('참가 대상은')));
+  await page.$$eval('[data-chat-error]',elements=>elements.at(-1).scrollIntoView({block:'center',behavior:'instant'}));
+  await page.screenshot({path:'../quality-chat-error-desktop.png'});
+  await page.setViewport({width:390,height:844});
+  await page.$$eval('[data-chat-error]',elements=>elements.at(-1).scrollIntoView({block:'center',behavior:'instant'}));
+  await page.screenshot({path:'../quality-chat-error-mobile.png'});
+  await send('다시 검색', '오류 후 복구 완료');
+  assert.equal(requests[9].contextToken,undefined);
+  assert.ok(requests[9].messages.filter(m=>m.role==='assistant').every(m=>!m.content.includes('참가 대상은')&&!m.content.includes(searchError)&&!m.content.includes(planError)));
   assert.ok(requests.every(request => request.messages.length <= 29 && request.messages.every(message => message.content.length <= 2000)));
   assert.deepEqual(errors, []);
-  const result = { passed: true, scenarios: ['numbered cards', 'token round trip and source rendering', 'missing SSE completion', 'stale token reset after new cards', 'invalid token reset', 'next request recovery'],
+  const result = { passed: true, scenarios: ['numbered cards', 'token round trip and source rendering', 'missing SSE completion', 'stale token reset after new cards', 'invalid token reset', 'next request recovery', 'search error message', 'planning error message', 'partial answer error and recovery without failed history'],
     requests: requests.length, externalRequestsBlocked: [...new Set(externalRequests)], modelCalls: 0, productionRequests: 0 };
-  await writeFile('../ui-verification.json', JSON.stringify(result, null, 2));
+  await writeFile('../quality-ui-verification.json', JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally { await browser.close(); }

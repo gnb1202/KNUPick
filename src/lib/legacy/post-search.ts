@@ -38,7 +38,7 @@ export interface SearchedPost {
 }
 
 const POST_COLUMNS =
-  'id, title, summary, original_url, posted_date, deadline, event_start_date, event_end_date, activity_types, keywords, campus';
+  'id, title, summary, content, original_url, posted_date, deadline, event_start_date, event_end_date, activity_types, keywords, campus';
 
 const ACTIVITY_TYPE_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 const CAMPUS_VALUES = new Set(['kongju', 'cheonan', 'yesan']);
@@ -205,8 +205,10 @@ async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFi
   if (args.campus) query = query.in('campus', ['common', args.campus]);
   if (args.deadline_from) query = query.gte('deadline', args.deadline_from);
   if (args.deadline_to) query = query.lte('deadline', args.deadline_to);
-  if (!args.include_expired && !args.deadline_from) {
-    query = query.or(`deadline.gte.${todayKST()},deadline.is.null`);
+  if (!args.include_expired) {
+    const today = todayKST();
+    // Same deadline -> event end -> event start fallback as the vector RPCs.
+    query = query.or(`deadline.gte.${today},and(deadline.is.null,event_end_date.gte.${today}),and(deadline.is.null,event_end_date.is.null,event_start_date.gte.${today}),and(deadline.is.null,event_end_date.is.null,event_start_date.is.null)`);
   }
 
   // 마감 필터가 있으면 마감 빠른 순, 없으면 최신 게시일 순

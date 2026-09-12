@@ -65,7 +65,18 @@ it('preserves metadata-only category and campus searches without an embedding ca
   expect(records()[0]).toMatchObject({ path: 'filter', semanticApplied: false });
   expect(builder.overlaps).toHaveBeenCalledWith('activity_types', [1]);
   expect(builder.in).toHaveBeenCalledWith('campus', ['common', 'cheonan']);
+  expect(builder.select).toHaveBeenCalledWith(expect.stringContaining('content'));
+  expect(builder.or).toHaveBeenCalledWith(expect.stringContaining('event_end_date.gte.2026-09-12'));
   expect(mocks.embed).not.toHaveBeenCalled();
+});
+
+it('applies expiry even with an explicit date lower bound, except when history was requested', async () => {
+  await searchPosts({ activity_types:[1],deadline_from:'2026-09-01' },'공모전');
+  expect(builder.or).toHaveBeenCalledOnce();
+  expect(builder.or.mock.calls[0][0]).toContain('and(deadline.is.null,event_end_date.is.null,event_start_date.is.null)');
+  builder.or.mockClear();
+  await searchPosts({ activity_types:[1],deadline_from:'2026-09-01',include_expired:true },'지난 공모전');
+  expect(builder.or).not.toHaveBeenCalled();
 });
 
 it('does not silently drop topic filters when the new RPC is absent or returns zero matches', async () => {
