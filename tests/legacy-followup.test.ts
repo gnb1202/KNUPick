@@ -17,6 +17,7 @@ vi.mock('@/lib/legacy/post-search', () => ({ searchPosts: mocks.search, SEARCH_P
 import { POST } from '@/lib/legacy/chat';
 import { followupEvidence, followupRequest, renderFollowup } from '@/lib/legacy/chat-followup';
 import { withUsageMeter } from '@/lib/usage-meter';
+import { withChatTrace } from '@/lib/legacy/chat-trace';
 import exchangeSource from './fixtures/legacy-exchange-source.json';
 
 const wrong = '이메일 접수 마감은 2026년 10월 11일 오후 3시까지이며, 실물 서류 제출 마감은 2026년 10월 11일 오후 6시까지입니다.';
@@ -221,15 +222,24 @@ it.each([true, false])('issues signed card order on ordinary search in agentic=%
   mocks.config.AGENTIC_RAG_ENABLED = agentic;
   const posts = [post, { ...post, id: 669 }];
   const stream = async function* () { yield { choices: [{ delta: { content: '공지 두 건을 찾았어요.' } }] }; };
-  if (agentic) {
-    mocks.search.mockResolvedValue(posts);
-    mocks.create.mockResolvedValueOnce(toolResult('search_posts', {}));
-  } else mocks.rpc.mockResolvedValue({ data: posts.map(post => ({ post, similarity: 0.5 })), error: null });
+  mocks.search.mockResolvedValue(posts);
+  if (agentic) mocks.create.mockResolvedValueOnce(toolResult('search_posts', {}));
   mocks.create.mockResolvedValueOnce(stream());
   const response = await POST(request('교환학생 선발 공지 찾아줘', undefined, false));
   expect(response.headers.get('X-Chat-Grounding-Version')).toBe('legacy-followup-v1');
   const rows = await events(response);
   expect(verifyContext(rows.at(-1).contextToken, mocks.env.CHAT_CONTEXT_SECRET!).ids).toEqual([772, 669]);
+});
+
+it.each([true, false])('reports search failure instead of no matches and skips answer generation in agentic=%s', async agentic => {
+  mocks.config.AGENTIC_RAG_ENABLED = agentic;
+  mocks.search.mockRejectedValue(new Error('private upstream error'));
+  if (agentic) mocks.create.mockResolvedValueOnce(toolResult('search_posts', { semantic_query: '컴퓨터공학' }));
+  const rows = await withChatTrace({ requestId: 'server-search-failure', mode: agentic ? 'agentic' : 'vanilla' }, async () =>
+    events(await POST(request('하이 나 컴퓨터공학과 4학년인데 공고 추천좀', undefined, false))));
+  expect(rows).toEqual([{ type: 'error', code: 'SEARCH_FAILED', requestId: 'server-search-failure', message: expect.stringContaining('검색 중 오류') }]);
+  expect(JSON.stringify(rows)).not.toMatch(/찾지 못했|private/);
+  expect(mocks.create).toHaveBeenCalledTimes(agentic ? 1 : 0);
 });
 
 it('keeps legacy search usable without a secret but refuses unsigned references', async () => {

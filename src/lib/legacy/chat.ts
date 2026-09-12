@@ -5,7 +5,6 @@ import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/ch
 import { beginUsage, currentUsageMeter, meteredRequestOptions } from '@/lib/usage-meter';
 import { supabaseAdmin } from '@/lib/supabase';
 import { openai, OPENAI_CONFIG } from '@/lib/openai';
-import { generateEmbedding } from '@/lib/embeddings';
 import { ACTIVITY_TYPES } from '@/lib/constants';
 import {
   searchPosts,
@@ -19,6 +18,7 @@ import { env } from '@/env';
 import { signContext, verifyContext } from '../chat-context';
 import { searchPlanSchema } from '../search-plan';
 import { followupSelection, followupEvidence, followupRequest, renderFollowup, SELECTION_FAILURE, LEGACY_GROUNDING_VERSION } from './chat-followup';
+import { currentChatTrace, traceChat } from './chat-trace';
 
 const CHAT_RATE_LIMIT = 12;
 const CHAT_RATE_WINDOW_MS = 60_000;
@@ -256,9 +256,12 @@ export function agenticPlanningRequest(messages: ChatMessage[], today: string): 
 function sseEncoder() {
   const encoder = new TextEncoder();
   const meter = currentUsageMeter();
+  const requestId = currentChatTrace()?.requestId;
   return (obj: unknown) => {
-    const event = obj as { type?: string };
-    return encoder.encode(`data: ${JSON.stringify((event.type === 'done' || event.type === 'error') && meter ? { ...event, usageReport: meter.report() } : obj)}\n\n`);
+    const event = obj as { type?: string; code?: string };
+    if (event.type !== 'done' && event.type !== 'error') return encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
+    traceChat('stream_end', { outcome: event.type === 'error' ? 'error' : 'success', errorCode: event.code });
+    return encoder.encode(`data: ${JSON.stringify({ ...event, requestId, ...(meter ? { usageReport: meter.report() } : {}) })}\n\n`);
   };
 }
 
@@ -285,6 +288,14 @@ function guidance(message: string, contextToken?: string): Response {
     controller.enqueue(sse({ type: 'posts', posts: [] }));
     controller.enqueue(sse({ type: 'text', delta: message }));
     controller.enqueue(sse({ type: 'done', contextToken }));
+    controller.close();
+  } }));
+}
+
+function searchFailure(): Response {
+  const sse = sseEncoder();
+  return sseResponse(new ReadableStream({ start(controller) {
+    controller.enqueue(sse({ type: 'error', code: 'SEARCH_FAILED', message: '공지 검색 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }));
     controller.close();
   } }));
 }
@@ -333,22 +344,9 @@ async function handleVanillaRAG(
   messages: ChatMessage[],
   lastUserContent: string
 ): Promise<Response> {
-  const queryEmbedding = await generateEmbedding(lastUserContent);
-  let matchedPosts: SearchedPost[] = [];
-  if (queryEmbedding && supabaseAdmin) {
-    const { data, error } = await supabaseAdmin.rpc('legacy_match_posts_at', {
-      as_of: todayKST(),
-      query_embedding: queryEmbedding,
-      match_threshold: OPENAI_CONFIG.SIMILARITY_THRESHOLD,
-      match_count: OPENAI_CONFIG.MAX_CONTEXT_POSTS,
-      include_expired: false,
-    });
-    if (error) console.error('match_posts error:', error);
-    matchedPosts = (data ?? []).map((r: { post: SearchedPost; similarity: number }) => ({
-      ...r.post,
-      similarity: r.similarity,
-    }));
-  }
+  let matchedPosts: SearchedPost[];
+  try { matchedPosts = await searchPosts({ limit: OPENAI_CONFIG.MAX_CONTEXT_POSTS }, lastUserContent); }
+  catch { return searchFailure(); }
 
   const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
   const stream = await client.chat.completions.create({
@@ -403,6 +401,7 @@ async function handleAgenticRAG(
   const baseMessages = planningRequest.messages;
 
   // 1차: tool call 결정
+  const planStarted = Date.now();
   const planUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
   const first = await client.chat.completions.create(planningRequest, meteredRequestOptions());
   planUsage?.observe(first.usage); planUsage?.finish();
@@ -413,6 +412,7 @@ async function handleAgenticRAG(
   const sse = sseEncoder();
 
   const planningFailure = () => sseResponse(new ReadableStream({ start(controller) {
+    traceChat('plan', { outcome: 'error', errorCode: 'SEARCH_PLAN_FAILED', durationMs: Date.now() - planStarted });
     controller.enqueue(sse({ type: 'error', code: 'SEARCH_PLAN_FAILED',
       message: '요청을 검색 조건으로 처리하지 못했어요. 잠시 후 다시 시도해주세요.' }));
     controller.close();
@@ -428,14 +428,17 @@ async function handleAgenticRAG(
     if (toolCall.function.name === 'chat_guidance') {
       if (Object.keys(args).length !== 1 || typeof args.reason !== 'string' ||
           !Object.hasOwn(GUIDANCE_MESSAGES, args.reason)) return planningFailure();
+      traceChat('plan', { outcome: 'success', action: 'chat_guidance', reason: args.reason, durationMs: Date.now() - planStarted });
       return guidance(GUIDANCE_MESSAGES[args.reason as keyof typeof GUIDANCE_MESSAGES], previousContextToken);
     }
     if (toolCall.function.name !== 'search_posts') return planningFailure();
     parsedArgs = args;
   } catch { return planningFailure(); }
 
-  const posts = await searchPosts(parsedArgs, lastUserContent);
-  console.log(`[chat] searchPosts returned ${posts.length} rows`);
+  traceChat('plan', { outcome: 'success', action: 'search_posts', durationMs: Date.now() - planStarted });
+  let posts: SearchedPost[];
+  try { posts = await searchPosts(parsedArgs, lastUserContent); }
+  catch { return searchFailure(); }
 
   // 2차: tool result + stream
   const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);

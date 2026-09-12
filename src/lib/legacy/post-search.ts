@@ -1,7 +1,14 @@
 import { chatDate } from '../chat-clock';
 import { supabaseAdmin } from '../supabase';
-import { generateEmbedding } from '../embeddings';
+import { generateEmbedding, EMBEDDING_MODEL_ID, EMBEDDING_DIMENSIONS } from '../embeddings';
 import { OPENAI_CONFIG } from '../openai';
+import { queryTrace, traceChat } from './chat-trace';
+
+export class PostSearchError extends Error {
+  constructor(readonly code: 'DATABASE_UNAVAILABLE' | 'EMBEDDING_FAILED' | 'VECTOR_LOOKUP_FAILED' | 'FILTER_LOOKUP_FAILED') {
+    super(code);
+  }
+}
 
 export interface SearchPostsArgs {
   activity_types?: number[];
@@ -74,9 +81,9 @@ async function embeddingSearch(
   limit: number,
   includeExpired = false
 ): Promise<SearchedPost[]> {
-  if (!supabaseAdmin) return [];
+  if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
   const emb = await generateEmbedding(text);
-  if (!emb) return [];
+  if (!emb) throw new PostSearchError('EMBEDDING_FAILED');
   const { data, error } = await supabaseAdmin.rpc('legacy_match_posts_at', {
     as_of: chatDate(),
     query_embedding: emb,
@@ -85,8 +92,7 @@ async function embeddingSearch(
     include_expired: includeExpired,
   });
   if (error) {
-    console.error('[post-search] match_posts error:', error);
-    return [];
+    throw new PostSearchError('VECTOR_LOOKUP_FAILED');
   }
   return (data ?? []).map((r: { post: SearchedPost; similarity: number }) => ({
     ...r.post,
@@ -98,7 +104,6 @@ export async function searchPosts(
   rawArgs: SearchPostsArgs,
   fallbackQuery: string
 ): Promise<SearchedPost[]> {
-  if (!supabaseAdmin) return [];
   const args = sanitizeArgs(rawArgs);
   const limit = args.limit ?? 5;
   const hasFilters = !!(
@@ -108,6 +113,32 @@ export async function searchPosts(
     args.campus
   );
   const hasSemantic = !!args.semantic_query;
+  const path = hasFilters ? 'filter' : hasSemantic ? 'semantic' : 'fallback';
+  const { semantic_query, ...filters } = args;
+  const started = Date.now();
+  traceChat('search_start', {
+    path, ...queryTrace(semantic_query ?? (hasFilters ? '' : fallbackQuery)),
+    semanticApplied: !hasFilters,
+    filters: { ...filters, include_expired: args.include_expired ?? false, limit },
+    asOf: todayKST(), threshold: hasFilters ? undefined : OPENAI_CONFIG.SIMILARITY_THRESHOLD,
+    model: hasFilters ? undefined : EMBEDDING_MODEL_ID, dimensions: hasFilters ? undefined : EMBEDDING_DIMENSIONS,
+  });
+  try {
+    const posts = await executeSearch(args, fallbackQuery, hasFilters, hasSemantic, limit);
+    traceChat('search_end', { outcome: posts.length ? 'success' : 'empty', path,
+      resultCount: posts.length, postIds: posts.map(post => post.id),
+      topSimilarity: posts.reduce<number | null>((max, post) => typeof post.similarity === 'number' && Number.isFinite(post.similarity)
+        ? Math.max(max ?? -1, post.similarity) : max, null), durationMs: Date.now() - started });
+    return posts;
+  } catch (error) {
+    traceChat('search_end', { outcome: 'error', path,
+      errorCode: error instanceof PostSearchError ? error.code : 'SEARCH_FAILED', durationMs: Date.now() - started });
+    throw error;
+  }
+}
+
+async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFilters: boolean, hasSemantic: boolean, limit: number): Promise<SearchedPost[]> {
+  if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
 
   // Case A: 빈 인자 → 마지막 user message로 임베딩 fallback
   if (!hasFilters && !hasSemantic) {
@@ -141,8 +172,7 @@ export async function searchPosts(
 
   const { data, error } = await query;
   if (error) {
-    console.error('[post-search] builder error:', error);
-    return [];
+    throw new PostSearchError('FILTER_LOOKUP_FAILED');
   }
   // MVP: filter+semantic 결합 시 reranking 생략. SQL 정렬을 신뢰.
   return ((data as SearchedPost[]) ?? []).slice(0, limit);
