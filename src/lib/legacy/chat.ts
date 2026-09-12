@@ -19,6 +19,9 @@ import { signContext, verifyContext } from '../chat-context';
 import { searchPlanSchema } from '../search-plan';
 import { followupSelection, followupEvidence, followupRequest, renderFollowup, SELECTION_FAILURE, LEGACY_GROUNDING_VERSION } from './chat-followup';
 import { currentChatTrace, traceChat } from './chat-trace';
+import { searchEvidence, sourceContext, SEARCH_SOURCE_RULES } from './chat-search-evidence';
+import type { Evidence } from '../evidence';
+import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
 
 const CHAT_RATE_LIMIT = 12;
 const CHAT_RATE_WINDOW_MS = 60_000;
@@ -45,7 +48,7 @@ function campusScope(campus: string): string {
   return `${campus === 'common' ? '전체 캠퍼스 공통 공지' : `${CAMPUS_LABELS[campus] || campus} 캠퍼스 분류`} (개최 장소 정보 아님)`;
 }
 
-function buildContextBlock(posts: SearchedPost[]): string {
+function buildContextBlock(posts: SearchedPost[], evidence: Evidence[]): string {
   if (posts.length === 0) return '(검색된 관련 공지가 없습니다.)';
   return posts
     .map((p, i) => {
@@ -62,7 +65,7 @@ function buildContextBlock(posts: SearchedPost[]): string {
         p.deadline && `- 마감일: ${p.deadline}`,
         p.event_start_date && `- 행사 시작: ${p.event_start_date}`,
         p.event_end_date && `- 행사 종료: ${p.event_end_date}`,
-        p.summary && `- 요약: ${p.summary}`,
+        `- 원문 근거: ${JSON.stringify(sourceContext(p, evidence))}`,
         p.original_url && `- 링크: ${p.original_url}`,
       ].filter(Boolean);
       return lines.join('\n');
@@ -327,38 +330,42 @@ async function handleVanillaRAG(
   try { matchedPosts = await searchPosts({ limit: OPENAI_CONFIG.MAX_CONTEXT_POSTS }, lastUserContent); }
   catch { return searchFailure(); }
 
-  const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
-  const stream = await client.chat.completions.create({
+  const evidence = searchEvidence(matchedPosts);
+  return streamSearchAnswer(client, matchedPosts, evidence, {
     model: OPENAI_CONFIG.CHAT_MODEL,
     stream: true,
     ...(currentUsageMeter() ? { stream_options: { include_usage: true } } : {}),
     max_tokens: 1200,
     temperature: 0.3,
     messages: [
-      { role: 'system', content: VANILLA_SYSTEM_PROMPT },
+      { role: 'system', content: VANILLA_SYSTEM_PROMPT + SEARCH_SOURCE_RULES },
       {
         role: 'system',
-        content: `[관련 공지]\n${buildContextBlock(matchedPosts)}\n\n오늘 날짜: ${todayKST()}`,
+        content: `[관련 공지]\n${buildContextBlock(matchedPosts, evidence)}\n\n오늘 날짜: ${todayKST()}`,
       },
       ...messages.filter(m => m.role === 'user').map((m) => ({ role: m.role, content: m.content })),
     ],
-  }, meteredRequestOptions());
+  });
+}
 
+function streamSearchAnswer(client: OpenAI, posts: SearchedPost[], evidence: Evidence[], params: ChatCompletionCreateParamsStreaming): Response {
+  const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
   const sse = sseEncoder();
   const readable = new ReadableStream({
     async start(controller) {
-      controller.enqueue(sse({ type: 'posts', posts: postsToWire(matchedPosts) }));
+      controller.enqueue(sse({ type: 'posts', posts: postsToWire(posts) }));
+      controller.enqueue(sse({ type: 'evidence', evidence }));
       try {
+        const stream = await client.chat.completions.create(params, meteredRequestOptions());
         for await (const chunk of stream) {
           if (chunk.usage) answerUsage?.observe(chunk.usage);
           const delta = chunk.choices[0]?.delta?.content || '';
           if (delta) controller.enqueue(sse({ type: 'text', delta }));
         }
         answerUsage?.finish();
-        controller.enqueue(sse({ type: 'done', contextToken: contextFor(matchedPosts) }));
-      } catch (err) {
-        console.error('[chat] vanilla stream error:', err);
-        controller.enqueue(sse({ type: 'error', message: '답변 생성 중 오류가 발생했어요.' }));
+        controller.enqueue(sse({ type: 'done', contextToken: contextFor(posts) }));
+      } catch {
+        controller.enqueue(sse({ type: 'error', code: 'ANSWER_FAILED', message: '답변 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }));
       } finally {
         controller.close();
       }
@@ -419,15 +426,15 @@ async function handleAgenticRAG(
   catch { return searchFailure(); }
 
   // 2차: tool result + stream
-  const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
-  const stream = await client.chat.completions.create({
+  const evidence = searchEvidence(posts);
+  return streamSearchAnswer(client, posts, evidence, {
     model: OPENAI_CONFIG.CHAT_MODEL,
     stream: true,
     ...(currentUsageMeter() ? { stream_options: { include_usage: true } } : {}),
     max_tokens: 1200,
     temperature: 0.3,
     messages: [
-      { role: 'system', content: `${AGENTIC_ANSWER_SYSTEM_PROMPT}\n오늘 날짜: ${todayKST()}` },
+      { role: 'system', content: `${AGENTIC_ANSWER_SYSTEM_PROMPT}${SEARCH_SOURCE_RULES}\n오늘 날짜: ${todayKST()}` },
       ...messages.filter(m => m.role === 'user'),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       firstMessage as any,
@@ -439,7 +446,7 @@ async function handleAgenticRAG(
             ref: `#${i + 1}`,
             id: p.id,
             title: p.title,
-            summary: p.summary,
+            ...sourceContext(p, evidence),
             campus_scope: campusScope(p.campus),
             activity_types: p.activity_types
               .map((id) => ACTIVITY_TYPES.find((t) => t.id === id)?.name)
@@ -452,29 +459,7 @@ async function handleAgenticRAG(
         }),
       },
     ],
-  }, meteredRequestOptions());
-
-  const readable = new ReadableStream({
-    async start(controller) {
-      // 검색 결과 카드 즉시 송출 (답변 생성 전)
-      controller.enqueue(sse({ type: 'posts', posts: postsToWire(posts) }));
-      try {
-        for await (const chunk of stream) {
-          if (chunk.usage) answerUsage?.observe(chunk.usage);
-          const delta = chunk.choices[0]?.delta?.content || '';
-          if (delta) controller.enqueue(sse({ type: 'text', delta }));
-        }
-        answerUsage?.finish();
-        controller.enqueue(sse({ type: 'done', contextToken: contextFor(posts) }));
-      } catch (err) {
-        console.error('[chat] agentic stream error:', err);
-        controller.enqueue(sse({ type: 'error', message: '답변 생성 중 오류가 발생했어요.' }));
-      } finally {
-        controller.close();
-      }
-    },
   });
-  return sseResponse(readable);
 }
 
 // ────────────────────────────────────────────────────────────────────

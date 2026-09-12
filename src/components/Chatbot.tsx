@@ -26,6 +26,7 @@ interface ChatMessage {
   posts?: RelatedPost[];
   evidence?: Evidence[];
   isStreaming?: boolean;
+  error?: string;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -143,7 +144,7 @@ export default function Chatbot() {
       setInput('');
       setIsLoading(true);
 
-      const historyForAPI = [...messages, userMessage].filter(m => m.content.trim()).slice(-29).map((m) => ({
+      const historyForAPI = [...messages, userMessage].filter(m => m.content.trim() && !m.error).slice(-29).map((m) => ({
         role: m.role,
         content: m.content.slice(0, 2000),
       }));
@@ -206,7 +207,8 @@ export default function Chatbot() {
                     m.id === assistantId
                       ? {
                           ...m,
-                          content: m.content || '죄송해요, 답변 중 오류가 발생했어요.',
+                          error: typeof parsed.message === 'string' && parsed.message.trim()
+                            ? parsed.message : '죄송해요, 답변 중 오류가 발생했어요.',
                           isStreaming: false,
                         }
                       : m
@@ -226,7 +228,7 @@ export default function Chatbot() {
             m.id === assistantId
               ? {
                   ...m,
-                  content: err instanceof Error ? err.message : '답변을 가져오지 못했어요.',
+                  error: err instanceof Error ? err.message : '답변을 가져오지 못했어요.',
                   isStreaming: false,
                 }
               : m
@@ -486,12 +488,19 @@ export default function Chatbot() {
                       <details data-chat-evidence style={{ fontSize: 12, lineHeight: 1.6 }}>
                         <summary style={{ cursor: 'pointer' }}>원문 근거 {msg.evidence!.length}개</summary>
                         {msg.evidence!.map(e => <div key={e.ref} style={{ marginTop: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                          <strong>[{e.ref}]</strong> {e.text_content}
+                          <strong>[{e.ref}]{msg.posts?.some(p => p.id === e.post_id) ? ` · 공지 #${msg.posts.findIndex(p => p.id === e.post_id) + 1}` : ''}</strong> {e.text_content}
                           {e.url && /^https?:\/\//.test(e.url) && <div><a href={e.url} target="_blank" rel="noopener noreferrer">공지 원문</a></div>}
                         </div>)}
                       </details>
                     )}
 
+                    {msg.error && (
+                      <div role="alert" data-chat-error style={{ padding: '10px 12px', fontSize: 13, lineHeight: 1.6,
+                        background: 'var(--surface)', border: '1px solid var(--border-soft)', borderRadius: 12 }}>
+                        {msg.content && <strong>답변이 중단되어 아래 내용은 일부만 표시됩니다. </strong>}
+                        {msg.error}
+                      </div>
+                    )}
                     {/* 메시지 본문 */}
                     {(msg.content || msg.isStreaming) && (
                       <div
