@@ -57,7 +57,6 @@ export default function NoticeSummary({ stats, error, loading, variant, comparis
     </div>}
 
     {error && <p className="notice-stats-error" role="status">공지 수를 불러오지 못했어요. <button type="button" onClick={onRetry} disabled={loading}>다시 불러오기</button></p>}
-    {stats?.todayCount === 0 && <p className="notice-no-new">오늘 올라온 공지는 아직 없어요.</p>}
     {todayOnly && <div className="notice-active-period"><span>오늘 올라온 공지만 보는 중</span><button type="button" onClick={onTodayToggle}>전체 공지로 돌아가기</button></div>}
   </div>;
 }

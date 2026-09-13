@@ -376,7 +376,6 @@ html.dark .gradient-bg {
 .notice-today-number:hover, .notice-today-inline:hover { text-decoration: underline; text-underline-offset: 5px; }
 .notice-today-number[aria-pressed="true"], .notice-today-inline[aria-pressed="true"] { background: var(--pick-soft); box-shadow: 0 0 0 4px var(--pick-soft); }
 .notice-summary button:disabled { cursor: default; }
-.notice-no-new { margin: 0; font-size: 13px; color: var(--text-mute); }
 .notice-stats-error { font-size: 13px; color: var(--hot); margin: 0; }
 .notice-stats-error button { border: 0; background: transparent; color: var(--accent); text-decoration: underline; padding: 8px; min-height: 40px; }
 .notice-active-period { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--pick-text); padding: 8px 14px; border-radius: 8px; background: var(--pick-soft); }
