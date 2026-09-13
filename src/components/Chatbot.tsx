@@ -524,36 +524,13 @@ export default function Chatbot() {
                       >
                         {msg.role === 'assistant' ? <ChatAnswer content={msg.content} /> : msg.content}
                         {msg.isStreaming && !msg.content && (
-                          <span style={{ display: 'inline-flex', gap: 4 }}>
-                            <span
-                              className="dot-pulse"
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: 'var(--text-dim)',
-                              }}
-                            />
-                            <span
-                              className="dot-pulse"
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: 'var(--text-dim)',
-                                animationDelay: '0.15s',
-                              }}
-                            />
-                            <span
-                              className="dot-pulse"
-                              style={{
-                                width: 6,
-                                height: 6,
-                                borderRadius: '50%',
-                                background: 'var(--text-dim)',
-                                animationDelay: '0.3s',
-                              }}
-                            />
+                          <span className="chat-waiting" role="status" aria-live="polite">
+                            잠시만 기다려 주세요
+                            <span className="chat-waiting-dots" aria-hidden="true">
+                              {[0, 1, 2].map(index => (
+                                <span key={index} className="dot-pulse" style={{ animationDelay: `${index * 0.15}s` }} />
+                              ))}
+                            </span>
                           </span>
                         )}
                         {msg.isStreaming && msg.content && (

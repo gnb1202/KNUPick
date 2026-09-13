@@ -229,6 +229,25 @@ button:disabled { cursor: not-allowed; }
 .dot-pulse {
   animation: pulse-soft 1.2s ease-in-out infinite;
 }
+.chat-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.chat-waiting-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.chat-waiting-dots > span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .cursor-blink {
   animation: blink 1s step-end infinite;
   color: var(--accent);
@@ -459,4 +478,5 @@ html.dark .gradient-bg {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   .animate-fade-up { opacity: 1; }
   .card-hover:hover { transform: none; }
+  .chat-waiting-dots > span { animation: none; }
 }
