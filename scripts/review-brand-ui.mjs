@@ -77,7 +77,7 @@ try {
   if (before) {
     console.log(`Baseline saved: ${output}`);
   } else {
-    assert.equal(await page.$eval('h1', el => el.innerText.replace(/\s/g, '')), '당신을위한공지,여기서PICK');
+    assert.equal(await page.$eval('h1', el => el.getAttribute('aria-label')), '당신을 위한 공지, 여기서 PICK');
     await page.focus('[aria-label="공지 검색"]');
     await page.keyboard.type('장학금');
     await page.waitForFunction(() => document.querySelectorAll('.notice-card').length === 1);
