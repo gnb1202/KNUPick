@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit --incremental false",
     "test:chat-ui": "node scripts/test-chat-followup-ui.mjs",
-    "test:chat-observation-ui": "node scripts/test-chat-observation-ui.mjs"
+    "test:chat-observation-ui": "node scripts/test-chat-observation-ui.mjs",
+    "test:chat-observation-local": "node scripts/test-chat-observation-local.mjs"
   },
   "dependencies": {
     "@sparticuz/chromium": "^143.0.0",

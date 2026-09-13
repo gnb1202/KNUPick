@@ -12,7 +12,8 @@ vi.mock('@/lib/rate-limit', () => ({ checkRateLimit: mocks.limit }));
 vi.mock('next/server', async original => ({ ...await original<typeof import('next/server')>(), after: (fn: () => Promise<void>) => mocks.after.push(fn) }));
 import { requireTester, ownedObservation, validateObservationParent, requestObservationIdentity } from '@/lib/chat-observation-store';
 import { GET as access } from '@/app/api/chat/observation-access/route';
-import { GET as detail } from '@/app/api/admin/chat-observations/[requestId]/route';
+import { GET as detail, PATCH as review } from '@/app/api/admin/chat-observations/[requestId]/route';
+import { GET as list } from '@/app/api/admin/chat-observations/route';
 import { GET as purge } from '@/app/api/internal/chat-observations/purge/route';
 import { POST } from '@/app/api/chat/route';
 import { PUT as feedback } from '@/app/api/chat/feedback/route';
@@ -20,9 +21,9 @@ const owner = randomUUID(), other = randomUUID(), sessionId = randomUUID(), rowI
 const req = (headers = {}, url = 'http://localhost/api/chat') => new NextRequest(url, { headers: { authorization: 'Bearer verified-token', ...headers } });
 const observed = () => req({ 'x-chat-observation': 'chat-observation-v1', 'x-chat-session-id': sessionId });
 function query(result: unknown) {
-  const chain = { select: vi.fn(), update: vi.fn(), eq: vi.fn(), gt: vi.fn(), lte: vi.fn(), delete: vi.fn(), abortSignal: vi.fn(), maybeSingle: vi.fn().mockResolvedValue(result),
+  const chain = { select: vi.fn(), update: vi.fn(), eq: vi.fn(), gt: vi.fn(), gte: vi.fn(), order: vi.fn(), limit: vi.fn(), lte: vi.fn(), delete: vi.fn(), abortSignal: vi.fn(), maybeSingle: vi.fn().mockResolvedValue(result),
     then: (resolve: (r: unknown) => unknown) => Promise.resolve(result).then(resolve) };
-  for (const name of ['select', 'update', 'eq', 'gt', 'lte', 'delete', 'abortSignal'] as const) chain[name].mockReturnValue(chain);
+  for (const name of ['select', 'update', 'eq', 'gt', 'gte', 'order', 'limit', 'lte', 'delete', 'abortSignal'] as const) chain[name].mockReturnValue(chain);
   return chain;
 }
 beforeEach(() => {
@@ -117,4 +118,41 @@ it('reports rejected feedback saves without exposing upstream errors or pretendi
   expect(response.status).toBe(503); expect(await response.text()).not.toContain('database secret');
   mocks.limit.mockResolvedValue({ ok: false });
   expect((await feedback(vote({ requestId: rowId, rating: 'up' }))).status).toBe(429);
+});
+
+it('lists only owner metadata inside the retention window with an explicit bounded sample', async () => {
+  const chain = query({ data: Array.from({ length: 201 }, (_, i) => ({ request_id: String(i) })), error: null }); mocks.from.mockReturnValue(chain);
+  const response = await list(req({}, 'http://localhost/api/admin/chat-observations?days=30'));
+  const data = await response.json(); expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('no-store');
+  expect(data.rows).toHaveLength(200); expect(data.hasMore).toBe(true); expect(data.limit).toBe(200);
+  expect(chain.eq).toHaveBeenCalledWith('tester_user_id', owner); expect(chain.gt).toHaveBeenCalledWith('expires_at', data.asOf);
+  expect(chain.gte).toHaveBeenCalledWith('started_at', data.from); expect(chain.lte).toHaveBeenCalledWith('started_at', data.asOf);
+  expect(chain.select.mock.calls[0][0]).not.toContain('*'); expect(chain.select.mock.calls[0][0]).not.toContain('payload,');
+  expect((await list(req({}, 'http://localhost/api/admin/chat-observations?days=999'))).status).toBe(400);
+  mocks.getUser.mockResolvedValue({ data: { user: { id: other } } });
+  expect((await list(req())).status).toBe(403);
+});
+it('reviews owned records with capture off without overwriting execution or user feedback', async () => {
+  mocks.env.CHAT_OBSERVABILITY_MODE = 'off';
+  const row = query({ data: { status: 'completed' }, error: null }), saved = query({ data: { review_verdict: 'issue' }, error: null });
+  mocks.from.mockReturnValueOnce(row).mockReturnValueOnce(saved);
+  const context = { params: Promise.resolve({ requestId: rowId }) };
+  const response = await review(vote({ verdict: 'issue', reasons: ['fact'], comment: 'me@example.org' }), context);
+  expect(response.status).toBe(200); expect(await response.json()).toEqual({ review: { review_verdict: 'issue' } });
+  expect(saved.update).toHaveBeenCalledWith({ review_verdict: 'issue', review_reasons: ['fact'], review_comment: '[이메일]', reviewed_by: owner, reviewed_at: expect.any(String) });
+  expect(saved.eq).toHaveBeenCalledWith('tester_user_id', owner); expect(saved.gt).toHaveBeenCalledWith('expires_at', expect.any(String));
+  mocks.from.mockReturnValueOnce(row).mockReturnValueOnce(saved);
+  await review(vote({ verdict: 'unreviewed', reasons: ['fact'], comment: 'clear' }), context);
+  expect(saved.update).toHaveBeenLastCalledWith({ review_verdict: 'unreviewed', review_reasons: [], review_comment: null, reviewed_by: null, reviewed_at: null });
+});
+it('rejects review identity forgery, malformed data, unavailable rows and storage failures', async () => {
+  const context = { params: Promise.resolve({ requestId: rowId }) };
+  for (const extra of [{ tester_user_id: other }, { reviewed_by: other }, { payload: {} }, { verdict: 'unknown' }, { reasons: ['fact', 'fact'] }])
+    expect((await review(vote({ verdict: 'issue', ...extra }), context)).status).toBe(400);
+  for (const [data, status] of [[null, 404], [{ status: 'in_progress', started_at: new Date().toISOString() }, 409]] as const) {
+    const chain = query({ data, error: null }); mocks.from.mockReturnValue(chain);
+    expect((await review(vote({ verdict: 'pass' }), context)).status).toBe(status); expect(chain.update).not.toHaveBeenCalled();
+  }
+  mocks.from.mockReturnValueOnce(query({ data: { status: 'error' }, error: null })).mockReturnValueOnce(query({ error: { message: 'db secret' } }));
+  const failed = await review(vote({ verdict: 'issue' }), context); expect(failed.status).toBe(503); expect(await failed.text()).not.toContain('db secret');
 });
