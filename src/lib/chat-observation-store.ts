@@ -13,6 +13,21 @@ export function observationError(error: unknown) {
     ? privateJson({ code: error.code, error: error.message }, error.status)
     : privateJson({ code: 'OBSERVATION_UNAVAILABLE', error: '실행 기록을 처리하지 못했어요. 잠시 후 다시 시도해주세요.' }, 503);
 }
+export async function readObservationJson(request: Request, maxBytes = 4096): Promise<unknown> {
+  const reader = request.body?.getReader();
+  if (!reader) throw new ObservationHttpError(400, 'INVALID_BODY', '요청 내용이 없어요.');
+  const chunks: Uint8Array[] = []; let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) { await reader.cancel(); throw new ObservationHttpError(413, 'BODY_TOO_LARGE', '요청 내용이 너무 길어요.'); }
+      chunks.push(value);
+    }
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { throw new ObservationHttpError(400, 'INVALID_JSON', '요청 형식이 올바르지 않아요.'); }
+  } finally { reader.releaseLock(); }
+}
 // Lazy import keeps ordinary, non-observed chat independent of this storage path.
 export async function observationDb() {
   const { supabaseAdmin } = await import('./supabase');

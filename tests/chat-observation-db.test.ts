@@ -11,6 +11,7 @@ it('protects private records, rejects late writes and expires rows without exten
     const owner = randomUUID(), stranger = randomUUID();
     await db.query('INSERT INTO auth.users VALUES ($1),($2)', [owner, stranger]);
     await db.exec(readFileSync('supabase/migrations/20260913091908_chat_observations.sql', 'utf8'));
+    await db.exec(readFileSync('supabase/migrations/20260913094532_chat_feedback.sql', 'utf8'));
     const original = { request_id: randomUUID(), tester_user_id: owner, session_id: randomUUID(), previous_request_id: null,
       consent_version: 'chat-observation-v1', started_at: '2026-09-13T09:00:00Z', status: 'in_progress', revision: 1,
       ended_at: null, duration_ms: null, first_text_ms: null, error_code: null, payload: { schemaVersion: 'chat-observation-v1', answer: '' } };
@@ -20,9 +21,12 @@ it('protects private records, rejects late writes and expires rows without exten
     await save(original);
     const expires = (await rows()).rows[0].expires_at;
     await save({ ...original, revision: 3, status: 'completed', ended_at: '2026-09-13T09:00:01Z', duration_ms: 1000, payload: { schemaVersion: 'chat-observation-v1', answer: 'final' } });
+    for (let i = 0; i < 2; i++) await db.query("UPDATE public.chat_observations SET feedback_rating='down', feedback_reasons=ARRAY['fact'] WHERE request_id=$1", [original.request_id]);
     await save({ ...original, revision: 2 });
     await save({ ...original, revision: 9, tester_user_id: stranger });
     expect((await rows()).rows[0]).toMatchObject({ status: 'completed', revision: 3, tester_user_id: owner, expires_at: expires, payload: { answer: 'final' } });
+    expect((await db.query<{ feedback_rating: string }>('SELECT feedback_rating FROM public.chat_observations')).rows).toEqual([{ feedback_rating: 'down' }]);
+    await expect(db.exec("UPDATE public.chat_observations SET feedback_reasons=ARRAY['untrusted']")).rejects.toThrow('check constraint');
     for (const role of ['anon', 'authenticated']) {
       await db.exec(`RESET ROLE; SET ROLE ${role}`);
       await expect(rows()).rejects.toThrow('permission denied');

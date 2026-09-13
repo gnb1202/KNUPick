@@ -248,6 +248,15 @@ button:disabled { cursor: not-allowed; }
   border-radius: 50%;
   background: currentColor;
 }
+.chat-feedback { font-size: 12px; color: var(--text-dim); }
+.chat-feedback-actions { display: flex; align-items: center; gap: 8px; }
+.chat-feedback button { padding: 5px 9px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; }
+.chat-feedback button[aria-pressed="true"] { border-color: var(--accent); background: var(--surface-2); }
+.chat-feedback fieldset { border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px; margin-top: 10px; }
+.chat-feedback-reasons { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.chat-feedback-reasons label { display: flex; align-items: center; gap: 7px; }
+.chat-feedback textarea { display: block; width: 100%; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface); color: var(--text); padding: 6px; font-size: 16px; margin: 4px 0 8px; }
+.chat-feedback [role="alert"] { margin-top: 8px; }
 .cursor-blink {
   animation: blink 1s step-end infinite;
   color: var(--accent);

@@ -8,6 +8,8 @@ import BrandMark from './BrandMark';
 import type { Evidence } from '@/lib/evidence';
 import { useAuth } from '@/contexts/AuthContext';
 import { OBSERVATION_VERSION } from '@/lib/chat-observation-types';
+import ChatFeedback from './ChatFeedback';
+import type { AnswerFeedback } from '@/lib/chat-feedback';
 
 interface RelatedPost {
   id: number;
@@ -31,6 +33,7 @@ interface ChatMessage {
   error?: string;
   requestId?: string;
   observationOwner?: string;
+  feedback?: AnswerFeedback;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -435,7 +438,7 @@ export default function Chatbot() {
             {(canRecord || captureSession || (observationAccess?.userId === user?.id && observationAccess?.canRead)) && (
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-soft)', fontSize: 12, color: 'var(--text-dim)' }}>
                 {(canRecord || captureSession) && <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input type="checkbox" checked={Boolean(captureSession && captureSession.owner === user?.id)} disabled={isLoading}
+                  <input type="checkbox" aria-label="품질 확인용 대화 기록" checked={Boolean(captureSession && captureSession.owner === user?.id)} disabled={isLoading}
                     onChange={event => toggleCapture(event.target.checked)} />
                   품질 확인용 대화 기록 (30일 보관)
                 </label>}
@@ -603,6 +606,10 @@ export default function Chatbot() {
                         )}
                       </div>
                     )}
+                    {msg.role === 'assistant' && !msg.isStreaming && !msg.error && msg.content && msg.requestId &&
+                      msg.observationOwner === user?.id && session?.access_token && <ChatFeedback
+                        requestId={msg.requestId} token={session.access_token} initial={msg.feedback}
+                        onSaved={feedback => setMessages(list => list.map(m => m.id === msg.id ? { ...m, feedback } : m))} />}
                   </div>
                 </div>
               ))}
