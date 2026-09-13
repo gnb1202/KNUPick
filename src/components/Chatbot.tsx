@@ -6,6 +6,8 @@ import { ddayLabel } from './atoms';
 import { ChatAnswer } from './ChatAnswer';
 import BrandMark from './BrandMark';
 import type { Evidence } from '@/lib/evidence';
+import { useAuth } from '@/contexts/AuthContext';
+import { OBSERVATION_VERSION } from '@/lib/chat-observation-types';
 
 interface RelatedPost {
   id: number;
@@ -27,6 +29,8 @@ interface ChatMessage {
   evidence?: Evidence[];
   isStreaming?: boolean;
   error?: string;
+  requestId?: string;
+  observationOwner?: string;
 }
 
 const SUGGESTED_QUESTIONS = [
@@ -95,6 +99,7 @@ function MiniPostCard({ post, position }: { post: RelatedPost; position: number 
 }
 
 export default function Chatbot() {
+  const { user, session } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -103,6 +108,40 @@ export default function Chatbot() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const contextTokenRef = useRef<string | undefined>(undefined);
+  const abortRef = useRef<AbortController | null>(null);
+  const previousRequestRef = useRef<string | undefined>(undefined);
+  const [observationAccess, setObservationAccess] = useState<{ userId: string; canRead: boolean; canRecord: boolean } | null>(null);
+  const [captureSession, setCaptureSession] = useState<{ id: string; owner: string } | null>(null);
+  const canRecord = observationAccess?.userId === user?.id && observationAccess?.canRecord;
+
+  useEffect(() => {
+    if (!isOpen || !session?.access_token) return;
+    const controller = new AbortController();
+    fetch('/api/chat/observation-access', { headers: { Authorization: `Bearer ${session.access_token}` }, signal: controller.signal })
+      .then(async response => {
+        const data = response.ok ? await response.json() : {};
+        if (!controller.signal.aborted) setObservationAccess({ userId: session.user.id, canRead: data.canRead === true, canRecord: data.canRecord === true });
+      }).catch(() => { if (!controller.signal.aborted) setObservationAccess(null); });
+    return () => controller.abort();
+  }, [isOpen, session?.access_token, session?.user.id]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    if (captureSession && captureSession.owner !== user?.id) {
+      abortRef.current?.abort();
+      // Clear private test history on account changes; rendering below also hides it immediately.
+      setMessages([]);
+      setCaptureSession(null);
+      contextTokenRef.current = undefined; previousRequestRef.current = undefined;
+    }
+  }, [captureSession, user?.id]);
+
+  const toggleCapture = (enabled: boolean) => {
+    if (isLoading || (enabled && (!canRecord || !user))) return;
+    setMessages([]); setInput('');
+    contextTokenRef.current = undefined; previousRequestRef.current = undefined;
+    setCaptureSession(enabled && user ? { id: crypto.randomUUID(), owner: user.id } : null);
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -143,6 +182,9 @@ export default function Chatbot() {
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
       setInput('');
       setIsLoading(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const capture = captureSession?.owner === user?.id && session?.access_token ? captureSession : null;
 
       const historyForAPI = [...messages, userMessage].filter(m => m.content.trim() && !m.error).slice(-29).map((m) => ({
         role: m.role,
@@ -152,8 +194,14 @@ export default function Chatbot() {
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(capture ? {
+            Authorization: `Bearer ${session!.access_token}`,
+            'X-Chat-Observation': OBSERVATION_VERSION,
+            'X-Chat-Session-Id': capture.id,
+            ...(previousRequestRef.current ? { 'X-Chat-Previous-Request-Id': previousRequestRef.current } : {}),
+          } : {}) },
           body: JSON.stringify({ messages: historyForAPI, contextToken: contextTokenRef.current }),
+          signal: controller.signal,
         });
         if (!res.ok || !res.body) {
           const problem = await res.json().catch(() => ({}));
@@ -162,6 +210,8 @@ export default function Chatbot() {
         }
 
         const reader = res.body.getReader();
+        const responseRequestId = res.headers.get('x-request-id');
+        const captureRequested = Boolean(capture && res.headers.get('x-chat-observation') === 'requested');
         const decoder = new TextDecoder();
         let buffer = '';
         let completed = false;
@@ -196,11 +246,14 @@ export default function Chatbot() {
               } else if (parsed.type === 'done') {
                 completed = true;
                 contextTokenRef.current = parsed.contextToken;
+                const linkedId = captureRequested && responseRequestId && parsed.requestId === responseRequestId ? responseRequestId : undefined;
+                if (captureRequested) previousRequestRef.current = linkedId;
                 setMessages((prev) =>
-                  prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false } : m))
+                  prev.map((m) => (m.id === assistantId ? { ...m, isStreaming: false, requestId: linkedId, observationOwner: linkedId ? capture?.owner : undefined } : m))
                 );
               } else if (parsed.type === 'error') {
                 completed = true;
+                if (captureRequested) previousRequestRef.current = parsed.requestId === responseRequestId ? responseRequestId ?? undefined : undefined;
                 if (parsed.contextToken) contextTokenRef.current = parsed.contextToken;
                 setMessages((prev) =>
                   prev.map((m) =>
@@ -222,23 +275,24 @@ export default function Chatbot() {
         }
         if (!completed) throw new Error('답변 연결이 중단되었습니다. 다시 시도해주세요.');
       } catch (err) {
-        console.error('Chat error:', err);
+        if (!controller.signal.aborted) console.error('Chat request failed');
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
               ? {
                   ...m,
-                  error: err instanceof Error ? err.message : '답변을 가져오지 못했어요.',
+                  error: controller.signal.aborted ? '답변 생성을 중지했어요.' : err instanceof Error ? err.message : '답변을 가져오지 못했어요.',
                   isStreaming: false,
                 }
               : m
           )
         );
       } finally {
+        if (abortRef.current === controller) abortRef.current = null;
         setIsLoading(false);
       }
     },
-    [messages, isLoading]
+    [messages, isLoading, captureSession, user?.id, session]
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -378,6 +432,17 @@ export default function Chatbot() {
               </button>
             </div>
 
+            {(canRecord || captureSession || (observationAccess?.userId === user?.id && observationAccess?.canRead)) && (
+              <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-soft)', fontSize: 12, color: 'var(--text-dim)' }}>
+                {(canRecord || captureSession) && <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={Boolean(captureSession && captureSession.owner === user?.id)} disabled={isLoading}
+                    onChange={event => toggleCapture(event.target.checked)} />
+                  품질 확인용 대화 기록 (30일 보관)
+                </label>}
+                {captureSession && <div style={{ marginTop: 6 }}>이 테스트 대화의 질문·근거·답변이 기록됩니다. 전환하면 새 대화를 시작합니다.</div>}
+                {observationAccess?.userId === user?.id && observationAccess?.canRead && <a href="/admin/chat-observations" style={{ display: 'inline-block', marginTop: 6 }}>내 테스트 기록 검토</a>}
+              </div>
+            )}
             {/* 메시지 영역 */}
             <div
               style={{
@@ -452,7 +517,7 @@ export default function Chatbot() {
                 </div>
               )}
 
-              {messages.map((msg) => (
+              {(captureSession && captureSession.owner !== user?.id ? [] : messages).map((msg) => (
                 <div
                   key={msg.id}
                   style={{
@@ -591,7 +656,8 @@ export default function Chatbot() {
                     alignSelf: 'center',
                   }}
                 />
-                <button
+                {isLoading ? <button type="button" className="btn-press" onClick={() => abortRef.current?.abort()}
+                  style={{ border: '1px solid var(--border-soft)', borderRadius: 10, padding: '8px 14px', background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer', flexShrink: 0 }}>중지</button> : <button
                   type="submit"
                   disabled={!input.trim() || isLoading}
                   className="btn-press"
@@ -607,7 +673,7 @@ export default function Chatbot() {
                   }}
                 >
                   전송 ↑
-                </button>
+                </button>}
               </div>
               <div
                 style={{

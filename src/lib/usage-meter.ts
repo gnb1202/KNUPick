@@ -6,6 +6,7 @@ export type UsageReport = { version: 'chat-embedding-v1'; complete: boolean; cal
 const scope = new AsyncLocalStorage<UsageMeter>();
 const integer = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 export class UsageMeter {
+  constructor(readonly exactAttempts = true) {}
   private calls: UsageCall[] = [];
   private supported = true;
   unsupported() { this.supported = false; }
@@ -25,7 +26,7 @@ export class UsageMeter {
   report(): UsageReport { return { version: 'chat-embedding-v1', complete: this.supported && this.calls.every(c => c.complete), calls: this.calls.map(c => ({ ...c })) }; }
 }
 export const currentUsageMeter = () => scope.getStore();
-export const withUsageMeter = <T>(run: () => T): T => scope.run(new UsageMeter(), run);
+export const withUsageMeter = <T>(run: () => T, exactAttempts = true): T => scope.run(new UsageMeter(exactAttempts), run);
 export const beginUsage = (kind: UsageCall['kind'], model: string) => currentUsageMeter()?.begin(kind, model);
 // Exact attempt accounting is enabled only inside the isolated evaluation scope.
-export const meteredRequestOptions = () => currentUsageMeter() ? { maxRetries: 0 } : {};
+export const meteredRequestOptions = () => currentUsageMeter()?.exactAttempts ? { maxRetries: 0 } : {};

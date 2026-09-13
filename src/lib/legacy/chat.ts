@@ -22,6 +22,7 @@ import { currentChatTrace, traceChat } from './chat-trace';
 import { searchEvidence, sourceContext, SEARCH_SOURCE_RULES } from './chat-search-evidence';
 import type { Evidence } from '../evidence';
 import type { ChatCompletionCreateParamsStreaming } from 'openai/resources/chat/completions';
+import { currentObservation, observationSignal, contentHash, observeCall } from '../chat-observation';
 
 const CHAT_RATE_LIMIT = 12;
 const CHAT_RATE_WINDOW_MS = 60_000;
@@ -240,6 +241,7 @@ function sseEncoder() {
   const meter = currentUsageMeter();
   const requestId = currentChatTrace()?.requestId;
   return (obj: unknown) => {
+    currentObservation()?.event(obj);
     const event = obj as { type?: string; code?: string };
     if (event.type !== 'done' && event.type !== 'error') return encoder.encode(`data: ${JSON.stringify(obj)}\n\n`);
     traceChat('stream_end', { outcome: event.type === 'error' ? 'error' : 'success', errorCode: event.code });
@@ -258,6 +260,33 @@ function sseResponse(readable: ReadableStream): Response {
   });
 }
 
+// Keep SSE framing and ordering; guard late producer writes after cancellation.
+function chatStream(run: (send: (event: unknown) => void) => void | Promise<void>): Response {
+  const observation = currentObservation(), encode = sseEncoder();
+  let closed = false;
+  return sseResponse(new ReadableStream({
+    start(controller) {
+      const send = (event: unknown) => {
+        if (closed) return;
+        controller.enqueue(encode(event));
+        const type = (event as { type?: string }).type;
+        if (type === 'done' || type === 'error') { closed = true; controller.close(); }
+      };
+      Promise.resolve().then(() => run(send)).catch(() => {
+        send({ type: 'error', code: 'ANSWER_FAILED', message: '답변 중 오류가 발생했어요. 다시 시도해주세요.' });
+      }).finally(() => {
+        if (!closed) { closed = true; observation?.finish('unknown', 'STREAM_INCOMPLETE'); controller.close(); }
+      });
+    },
+    cancel() { closed = true; observation?.cancel(); },
+  }));
+}
+
+function modelCall(name: string, params: ChatCompletionCreateParamsNonStreaming | ChatCompletionCreateParamsStreaming) {
+  return currentObservation()?.begin(name, { model: params.model, temperature: params.temperature,
+    maxTokens: params.max_tokens, systemHash: contentHash(params.messages.filter(m => m.role === 'system')) });
+}
+
 function contextFor(posts: SearchedPost[]) {
   return env.CHAT_CONTEXT_SECRET
     ? signContext(posts.map(p => p.id), searchPlanSchema.parse({}), env.CHAT_CONTEXT_SECRET)
@@ -265,57 +294,59 @@ function contextFor(posts: SearchedPost[]) {
 }
 
 function guidance(message: string, contextToken?: string): Response {
-  const sse = sseEncoder();
-  return sseResponse(new ReadableStream({ start(controller) {
-    controller.enqueue(sse({ type: 'posts', posts: [] }));
-    controller.enqueue(sse({ type: 'text', delta: message }));
-    controller.enqueue(sse({ type: 'done', contextToken }));
-    controller.close();
-  } }));
+  return chatStream(send => {
+    send({ type: 'posts', posts: [] });
+    send({ type: 'text', delta: message });
+    send({ type: 'done', contextToken });
+  });
 }
 
 function searchFailure(): Response {
-  const sse = sseEncoder();
-  return sseResponse(new ReadableStream({ start(controller) {
-    controller.enqueue(sse({ type: 'error', code: 'SEARCH_FAILED', message: '공지 검색 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }));
-    controller.close();
-  } }));
+  return chatStream(send => send({ type: 'error', code: 'SEARCH_FAILED', message: '공지 검색 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }));
 }
 
 async function handleFollowup(client: OpenAI, id: number, question: string, signal: AbortSignal): Promise<Response> {
   let post: SearchedPost;
   try {
     // Select legacy columns only; no evidence-index migration is needed here.
-    const { data, error } = await supabaseAdmin!.from('posts')
-      .select('id,title,summary,content,original_url,posted_date,deadline,event_start_date,event_end_date,activity_types,keywords,campus')
-      .eq('id', id).abortSignal(signal).maybeSingle();
-    if (error) throw error;
+    const data = await observeCall('reference_lookup', { postId: id }, async () => {
+      const result = await supabaseAdmin!.from('posts')
+        .select('id,title,summary,content,original_url,posted_date,deadline,event_start_date,event_end_date,activity_types,keywords,campus')
+        .eq('id', id).abortSignal(observationSignal() ?? signal).maybeSingle();
+      if (result.error) throw result.error;
+      return result.data;
+    }, result => ({ found: Boolean(result) }));
     if (!data) return Response.json({ code: 'INVALID_REFERENCE', error: '공지가 삭제되었거나 더 이상 조회되지 않아요. 다시 검색해주세요.' }, { status: 422 });
     post = data as SearchedPost;
   } catch {
     return Response.json({ code: 'REFERENCE_LOOKUP_FAILED', error: '공지를 다시 불러오지 못했어요. 잠시 후 시도해주세요.' }, { status: 503 });
   }
-  const evidence = followupEvidence(post, question), contextToken = contextFor([post]), sse = sseEncoder();
-  return sseResponse(new ReadableStream({ async start(controller) {
-    controller.enqueue(sse({ type: 'posts', posts: postsToWire([post]) }));
-    controller.enqueue(sse({ type: 'evidence', evidence }));
+  const evidence = followupEvidence(post, question), contextToken = contextFor([post]);
+  return chatStream(async send => {
+    send({ type: 'posts', posts: postsToWire([post]) });
+    send({ type: 'evidence', evidence });
+    let end: ReturnType<typeof modelCall>;
     try {
       let text = '이 공지에는 확인할 수 있는 본문·OCR 근거가 없어요. 요약만으로 답하지 않고 공지 원문 확인을 안내할게요.';
       if (evidence.length) {
         const usage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
-        const result = await client.chat.completions.create(followupRequest(OPENAI_CONFIG.CHAT_MODEL, question, evidence),
-          { ...meteredRequestOptions(), signal, maxRetries: 0 });
+        const params = followupRequest(OPENAI_CONFIG.CHAT_MODEL, question, evidence);
+        end = modelCall('evidence_selection', params);
+        const result = await client.chat.completions.create(params,
+          { ...meteredRequestOptions(), signal: observationSignal() ?? signal, maxRetries: 0 });
         usage?.observe(result.usage); usage?.finish();
         const choice = result.choices[0];
         if (choice?.finish_reason !== 'stop' || choice.message.refusal) throw new Error('INCOMPLETE_SELECTION');
         text = renderFollowup(choice.message.content ?? '', evidence);
+        end?.({ model: result.model, selectedRefs: JSON.parse(choice.message.content ?? '{}').refs });
       }
-      controller.enqueue(sse({ type: 'text', delta: text }));
-      controller.enqueue(sse({ type: 'done', contextToken }));
+      send({ type: 'text', delta: text });
+      send({ type: 'done', contextToken });
     } catch {
-      controller.enqueue(sse({ type: 'error', code: 'DETAIL_SELECTION_FAILED', message: SELECTION_FAILURE, contextToken }));
-    } finally { controller.close(); }
-  } }));
+      end?.({}, 'DETAIL_SELECTION_FAILED');
+      send({ type: 'error', code: 'DETAIL_SELECTION_FAILED', message: SELECTION_FAILURE, contextToken });
+    }
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -350,28 +381,28 @@ async function handleVanillaRAG(
 
 function streamSearchAnswer(client: OpenAI, posts: SearchedPost[], evidence: Evidence[], params: ChatCompletionCreateParamsStreaming): Response {
   const answerUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
-  const sse = sseEncoder();
-  const readable = new ReadableStream({
-    async start(controller) {
-      controller.enqueue(sse({ type: 'posts', posts: postsToWire(posts) }));
-      controller.enqueue(sse({ type: 'evidence', evidence }));
+  return chatStream(async send => {
+      send({ type: 'posts', posts: postsToWire(posts) });
+      send({ type: 'evidence', evidence });
+      const end = modelCall('answer_generation', params);
       try {
-        const stream = await client.chat.completions.create(params, meteredRequestOptions());
+        const signal = observationSignal();
+        const stream = await client.chat.completions.create(params, { ...meteredRequestOptions(), ...(signal ? { signal } : {}) });
+        let finishReason: string | null = null;
         for await (const chunk of stream) {
           if (chunk.usage) answerUsage?.observe(chunk.usage);
+          if (chunk.choices[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
           const delta = chunk.choices[0]?.delta?.content || '';
-          if (delta) controller.enqueue(sse({ type: 'text', delta }));
+          if (delta) send({ type: 'text', delta });
         }
         answerUsage?.finish();
-        controller.enqueue(sse({ type: 'done', contextToken: contextFor(posts) }));
+        end?.({ finishReason });
+        send({ type: 'done', contextToken: contextFor(posts) });
       } catch {
-        controller.enqueue(sse({ type: 'error', code: 'ANSWER_FAILED', message: '답변 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' }));
-      } finally {
-        controller.close();
+        end?.({}, 'ANSWER_FAILED');
+        send({ type: 'error', code: 'ANSWER_FAILED', message: '답변 생성 중 오류가 발생했어요. 잠시 후 다시 시도해주세요.' });
       }
-    },
   });
-  return sseResponse(readable);
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -388,20 +419,23 @@ async function handleAgenticRAG(
   // 1차: tool call 결정
   const planStarted = Date.now();
   const planUsage = beginUsage('chat', OPENAI_CONFIG.CHAT_MODEL);
-  const first = await client.chat.completions.create(planningRequest, meteredRequestOptions());
+  const endPlan = modelCall('planning', planningRequest);
+  let first;
+  try {
+    const signal = observationSignal();
+    first = await client.chat.completions.create(planningRequest, { ...meteredRequestOptions(), ...(signal ? { signal } : {}) });
+  } catch (error) { endPlan?.({}, 'PLANNING_FAILED'); throw error; }
   planUsage?.observe(first.usage); planUsage?.finish();
 
   const firstMessage = first.choices[0]?.message;
   const toolCalls = firstMessage?.tool_calls ?? [];
 
-  const sse = sseEncoder();
-
-  const planningFailure = () => sseResponse(new ReadableStream({ start(controller) {
+  const planningFailure = () => chatStream(send => {
+    endPlan?.({}, 'SEARCH_PLAN_FAILED');
     traceChat('plan', { outcome: 'error', errorCode: 'SEARCH_PLAN_FAILED', durationMs: Date.now() - planStarted });
-    controller.enqueue(sse({ type: 'error', code: 'SEARCH_PLAN_FAILED',
-      message: '요청을 검색 조건으로 처리하지 못했어요. 잠시 후 다시 시도해주세요.' }));
-    controller.close();
-  } }));
+    send({ type: 'error', code: 'SEARCH_PLAN_FAILED',
+      message: '요청을 검색 조건으로 처리하지 못했어요. 잠시 후 다시 시도해주세요.' });
+  });
   // Missing or malformed tool output is a planning failure, not missing user context.
   if (toolCalls.length !== 1 || toolCalls[0].type !== 'function') return planningFailure();
 
@@ -414,6 +448,7 @@ async function handleAgenticRAG(
       if (Object.keys(args).length !== 1 || typeof args.reason !== 'string' ||
           !Object.hasOwn(GUIDANCE_MESSAGES, args.reason)) return planningFailure();
       traceChat('plan', { outcome: 'success', action: 'chat_guidance', reason: args.reason, durationMs: Date.now() - planStarted });
+      endPlan?.({ action: 'chat_guidance', reason: args.reason, model: first.model });
       return guidance(GUIDANCE_MESSAGES[args.reason as keyof typeof GUIDANCE_MESSAGES], previousContextToken);
     }
     if (toolCall.function.name !== 'search_posts') return planningFailure();
@@ -421,6 +456,7 @@ async function handleAgenticRAG(
   } catch { return planningFailure(); }
 
   traceChat('plan', { outcome: 'success', action: 'search_posts', durationMs: Date.now() - planStarted });
+  endPlan?.({ action: 'search_posts', model: first.model });
   let posts: SearchedPost[];
   try { posts = await searchPosts(parsedArgs, lastUserContent); }
   catch { return searchFailure(); }
@@ -557,6 +593,16 @@ export async function POST(request: NextRequest) {
     }
   }
   const selection = followupSelection(lastUserMessage.content, previous);
+  currentObservation()?.start(messages, {
+    mode: OPENAI_CONFIG.AGENTIC_RAG_ENABLED ? 'agentic' : 'vanilla', model: OPENAI_CONFIG.CHAT_MODEL,
+    grounding: LEGACY_GROUNDING_VERSION, search: 'legacy-discovery-rrf-v1',
+    embedding: env.EMBEDDING_PROVIDER === 'ollama' ? env.OLLAMA_EMBED_MODEL : env.OPENAI_EMBED_MODEL,
+    deployment: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.CHAT_BUILD_SHA ?? 'local-unversioned',
+    planningPrompt: contentHash([agenticSystemPrompt('2000-01-01'), SEARCH_POSTS_TOOL, CHAT_GUIDANCE_TOOL]),
+    answerPrompt: contentHash([AGENTIC_ANSWER_SYSTEM_PROMPT, VANILLA_SYSTEM_PROMPT, SEARCH_SOURCE_RULES]),
+    selectionPrompt: contentHash(followupRequest(OPENAI_CONFIG.CHAT_MODEL, '', [])),
+    usageAccounting: currentUsageMeter()?.exactAttempts ? 'evaluation-no-sdk-retry' : 'provider-reported',
+  }, { previousCardIds: previous?.ids ?? [], selectedPostId: selection && 'id' in selection ? selection.id : null });
   if (selection) return 'id' in selection
     ? handleFollowup(openai, selection.id, lastUserMessage.content, request.signal)
     : guidance(selection.message, typeof contextToken === 'string' ? contextToken : undefined);

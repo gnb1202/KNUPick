@@ -62,6 +62,8 @@ export const env = createEnv({
     LLM_ENABLED: booleanFromString(false),
     CHAT_AGENTIC_RAG: booleanFromString(false),
     CHAT_CONTEXT_SECRET: z.string().min(32).optional(),
+    CHAT_OBSERVABILITY_MODE: z.enum(['off', 'testers']).default('off'),
+    CHAT_OBSERVER_USER_IDS: z.string().default(''),
     EVALUATION_AS_OF: z.string().optional(),
 
     // CLOVA OCR (이미지 공지 분석 — 선택)
@@ -92,6 +94,8 @@ export const env = createEnv({
     LLM_ENABLED: process.env.LLM_ENABLED,
     CHAT_AGENTIC_RAG: process.env.CHAT_AGENTIC_RAG,
     CHAT_CONTEXT_SECRET: process.env.CHAT_CONTEXT_SECRET,
+    CHAT_OBSERVABILITY_MODE: process.env.CHAT_OBSERVABILITY_MODE,
+    CHAT_OBSERVER_USER_IDS: process.env.CHAT_OBSERVER_USER_IDS,
     EVALUATION_AS_OF: process.env.EVALUATION_AS_OF,
     CLOVA_OCR_URL: process.env.CLOVA_OCR_URL,
     CLOVA_OCR_SECRET: process.env.CLOVA_OCR_SECRET,

@@ -3,6 +3,7 @@ export { buildEmbeddingText } from './embedding-text';
 import { openai } from './openai';
 import { beginUsage, currentUsageMeter } from './usage-meter';
 import { env } from '@/env';
+import { currentObservation } from './chat-observation';
 
 // posts.embedding이 vector(1024)이고 HNSW 인덱스가 이 차원에 묶여 있다.
 // 바꾸려면 schema.sql의 컬럼/인덱스/match_posts를 모두 손봐야 한다.
@@ -31,7 +32,9 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function openaiEmbed(inputs: string[], signal?: AbortSignal): Promise<(number[] | null)[]> {
   for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
     const usage = beginUsage('embedding', OPENAI_EMBED_MODEL);
+    const end = currentObservation()?.begin('embedding', { model: OPENAI_EMBED_MODEL, dimensions: EMBEDDING_DIMENSIONS, inputCount: inputs.length, attempt });
     try {
       const res = await openai.embeddings.create({
         model: OPENAI_EMBED_MODEL,
@@ -39,12 +42,14 @@ async function openaiEmbed(inputs: string[], signal?: AbortSignal): Promise<(num
         dimensions: EMBEDDING_DIMENSIONS,
       }, { signal, timeout: 20_000, maxRetries: 0 });
       usage?.observe(res.usage); usage?.finish();
+      end?.({ resultCount: res.data.length });
       // 응답 순서가 요청 순서와 같다고 보장되지 않으므로 index로 되맞춘다.
       const byIndex = new Map(res.data.map((d) => [d.index, d.embedding]));
       return inputs.map((_, i) => byIndex.get(i) ?? null);
     } catch (error) {
+      end?.({}, 'EMBEDDING_FAILED');
       if (attempt >= MAX_RETRIES || !isRetryable(error)) {
-        console.error('OpenAI embed failed:', error);
+        console.error('OpenAI embed failed:', { status: (error as { status?: number })?.status ?? null });
         return inputs.map(() => null);
       }
       const delay = RETRY_BASE_DELAY_MS * 2 ** attempt;
@@ -57,6 +62,7 @@ async function openaiEmbed(inputs: string[], signal?: AbortSignal): Promise<(num
 // Ollama /api/embed는 input에 string[] 도 받음 → 그대로 batch 처리
 async function ollamaEmbed(inputs: string[], signal?: AbortSignal): Promise<(number[] | null)[]> {
   currentUsageMeter()?.unsupported();
+  const end = currentObservation()?.begin('embedding', { model: OLLAMA_EMBED_MODEL, provider: 'ollama', inputCount: inputs.length });
   try {
     const res = await fetch(`${OLLAMA_HOST}/api/embed`, {
       method: 'POST',
@@ -65,14 +71,17 @@ async function ollamaEmbed(inputs: string[], signal?: AbortSignal): Promise<(num
       body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, input: inputs }),
     });
     if (!res.ok) {
-      console.error('Ollama embed failed:', res.status, await res.text());
+      end?.({}, 'EMBEDDING_FAILED');
+      console.error('Ollama embed failed:', res.status);
       return inputs.map(() => null);
     }
     const data = (await res.json()) as { embeddings?: number[][] };
-    if (!data.embeddings) return inputs.map(() => null);
+    if (!data.embeddings) { end?.({}, 'EMBEDDING_FAILED'); return inputs.map(() => null); }
+    end?.({ resultCount: data.embeddings.length });
     return inputs.map((_, i) => data.embeddings![i] || null);
-  } catch (error) {
-    console.error('Ollama embed failed:', error);
+  } catch {
+    end?.({}, 'EMBEDDING_FAILED');
+    console.error('Ollama embed failed');
     return inputs.map(() => null);
   }
 }
