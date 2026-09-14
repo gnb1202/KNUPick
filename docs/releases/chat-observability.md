@@ -76,3 +76,13 @@ Supabase 플러그인의 연결 계정이 다른 프로젝트여서 KNUPICK이 �
 운영 관측 테이블의 RLS가 켜져 있고 anon/authenticated는 직접 SELECT·쓰기 RPC 권한이 없다. service_role만 쓰기 RPC를 호출한다. 보안 점검에서 새 warn 이상은 없었다. 기존 [increment_rate_limit search_path](https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable), [public vector 확장](https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public), [유출 비밀번호 보호](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection) 경고 3개는 별도 기존 항목이다.
 
 운영은 최초 OFF 배포 후 만료 기록과 미만료 기록을 구분하는 삭제 확인을 거쳐 `gnb1202` 한 계정만 활성화한다. 이 계정도 채팅에서 ‘품질 확인용 대화 기록’을 직접 켜야 기록하며 전환하면 새 대화를 시작한다. 비로그인과 다른 계정은 수집할 수 없다. 환경 변경은 기존 배포에 소급되지 않으므로 재배포 완료 여부와 Vercel cron 등록을 함께 확인한다. 실제 배포·만료 삭제 확인 결과는 프로젝트 작업 자료 `backups/observation-rollout/production-verification.json`과 `docs/current-plan.md`에 보존한다.
+
+### 전환 결과 — 2026-09-14 16:55 KST
+
+[PR #11](https://github.com/gnb1202/KNUPick/pull/11)을 병합했다. 운영 소스는 `61b190b7b6db03f3c482bd901ffe915362cf4b62`이며 검증한 head와 Git tree가 같다. 최초 OFF 배포 `dpl_FkceFCjPRXvs5JCkZAZ1D8c8FvMv`에서 공개 페이지·목록, 무인증/ID 위조 요청의 401, Supabase 익명 직접 조회 차단을 확인했다. 합성 기록 두 개로 인증된 purge 호출이 만료 행만 삭제하고 미만료 행을 보존하는 것을 확인한 뒤 검증용 행을 모두 정리했다.
+
+운영에 `CHAT_OBSERVABILITY_MODE=testers`와 `gnb1202` 한 계정의 서버 허용 목록을 설정한 뒤 같은 소스를 재배포했다. 최종 배포 `dpl_8RwCrksfEkBfJHGGdg1yiaoBiEmn`은 READY이며 `https://knu-pick.vercel.app`의 연결도 확인했다. 기록 기능은 계정 허용과 별개로 채팅의 ‘품질 확인용 대화 기록 (30일 보관)’을 사용자가 직접 켜야 동작한다. [내 테스트 기록 검토](https://knu-pick.vercel.app/admin/chat-observations)에서 본인 기록·평가·판정을 확인한다.
+
+Vercel cron의 `/api/internal/chat-observations/purge`가 매일 UTC 00:00(KST 09:00)으로 등록되고 활성화된 것을 확인했다. 인증된 수동 호출 검증이며 이후 예약 시각의 자동 실행을 관측한 결과는 아니다. 실제 계정으로 로그인된 브라우저가 없어 동의·실제 질문 저장은 이번 운영 검증에 포함하지 않았다. 해당 흐름의 실제 Auth·DB 통합 검증은 앞선 전용 로컬 환경의 결과다. 유료 모델 호출은 0회이며 기존 공지 272건을 유지했다.
+
+앱 전체의 직전 운영 복귀 기준은 `68a44e5d2e50cbf38c98689746d3be9c56398afb` / `dpl_vfRJpRLRy4Kp2NLtmjgRMEQVCexL`다. 수집만 중단할 때는 위의 `off` 변경 후 재배포를 사용하여 삭제 cron을 유지한다. 이전 앱 전체로 복귀하면 cron 등록 상태도 다시 확인해야 한다. 테이블 삭제나 과거 기록 덮어쓰기는 필요 없다.
