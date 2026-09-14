@@ -65,4 +65,14 @@
 
 `test:chat-observation-local`은 KNUPick 전용 DB(56421/56422)와 위 세 마이그레이션이 필요하다. 기본 작업 경로는 앱 기준 `../../../rag-local`이고 다른 위치에서는 `CHAT_LOCAL_SUPABASE_WORKDIR`로 지정한다. project_id·로컬 주소를 검증하고 CLI가 반환한 로컬 키를 메모리에서만 사용한다. 3027 포트가 비어 있어야 한다. Next dev 서버·모의 모델 서버·임시 테스트 계정을 만들고 정리한다. 출력에는 키나 대화 원문을 남기지 않는다.
 
-운영 전환은 아직 수행하지 않았다. 세 마이그레이션을 순서대로 적용한 뒤 접근 권한을 확인하고 기본 OFF로 앱을 배포한다. 삭제 cron의 실제 호출과 만료 삭제를 확인한 다음 서버 허용 목록과 testers 모드로 한 계정에서 시작한다. 문제가 있으면 모드를 off로 되돌리며 만료 삭제는 유지한다. 운영 사용자 대화와 운영 모델의 품질은 이 로컬 모의 검증만으로 보증하지 않는다.
+운영 전환 순서는 세 마이그레이션 적용, 접근 권한 확인, 기본 OFF 앱 배포, 삭제 cron의 실제 호출·만료 삭제 확인, 허용 계정의 testers 모드 활성화다. 문제가 있으면 모드를 off로 되돌린 뒤 재배포하며 만료 삭제는 유지한다. 운영 사용자 대화와 운영 모델의 품질은 로컬 모의 검증만으로 보증하지 않는다.
+
+## 2026-09-14 운영 반영
+
+사용자가 운영 반영 진행과 테스트 로그인 아이디 `gnb1202`를 지정했다. 최신 main `68a44e5`의 홈 화면 변경을 병합한 뒤 테스트 116개·타입·빌드·기존 UI 9개·관측 UI 15개를 다시 확인했다.
+
+Supabase 플러그인의 연결 계정이 다른 프로젝트여서 KNUPICK이 확인된 CLI 계정을 사용했다. 별도 `backups/observation-rollout` 작업 폴더를 KNUPICK에 연결하고, 원격 마이그레이션 이력을 읽어온 뒤 이번 3개 파일만 복사했다. dry-run에 정확히 3개만 나타난 것을 확인한 후 적용했다. 원격 이력의 버전·이름과 로컬 파일이 일치한다. 기존 공지 272건·사용자 3명은 유지했다.
+
+운영 관측 테이블의 RLS가 켜져 있고 anon/authenticated는 직접 SELECT·쓰기 RPC 권한이 없다. service_role만 쓰기 RPC를 호출한다. 보안 점검에서 새 warn 이상은 없었다. 기존 [increment_rate_limit search_path](https://supabase.com/docs/guides/database/database-linter?lint=0011_function_search_path_mutable), [public vector 확장](https://supabase.com/docs/guides/database/database-linter?lint=0014_extension_in_public), [유출 비밀번호 보호](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection) 경고 3개는 별도 기존 항목이다.
+
+운영은 최초 OFF 배포 후 만료 기록과 미만료 기록을 구분하는 삭제 확인을 거쳐 `gnb1202` 한 계정만 활성화한다. 이 계정도 채팅에서 ‘품질 확인용 대화 기록’을 직접 켜야 기록하며 전환하면 새 대화를 시작한다. 비로그인과 다른 계정은 수집할 수 없다. 환경 변경은 기존 배포에 소급되지 않으므로 재배포 완료 여부와 Vercel cron 등록을 함께 확인한다. 실제 배포·만료 삭제 확인 결과는 프로젝트 작업 자료 `backups/observation-rollout/production-verification.json`과 `docs/current-plan.md`에 보존한다.
