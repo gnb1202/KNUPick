@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
+import HeroWordSlot from '@/components/HeroWordSlot';
 import FilterPanel from '@/components/FilterPanel';
 import PostList from '@/components/PostList';
 import SearchBar from '@/components/SearchBar';
@@ -212,8 +213,8 @@ function HomeContent() {
 
       <main id="main-content" className="home-main">
         <section className="home-hero">
-          <h1 className="hero-title">
-            <span>당신을 위한 공지,</span>{' '}<span>여기서 <strong>PICK</strong></span>
+          <h1 className="hero-title" aria-label="당신을 위한 공지, 여기서 PICK">
+            <span className="hero-title-lead">당신을 위한 <HeroWordSlot /></span>{' '}<span>여기서 <strong>PICK</strong></span>
           </h1>
           <div className="hero-search">
             <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder="어떤 공지를 찾고 있나요?" />
