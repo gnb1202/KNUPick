@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../supabase';
 import { generateEmbedding, generateEmbeddingsBatch, EMBEDDING_MODEL_ID, EMBEDDING_DIMENSIONS } from '../embeddings';
 import { OPENAI_CONFIG } from '../openai';
 import { queryTrace, traceChat } from './chat-trace';
+import { currentObservation, observationSignal, observeCall } from '../chat-observation';
 
 export class PostSearchError extends Error {
   constructor(readonly code: 'DATABASE_UNAVAILABLE' | 'EMBEDDING_FAILED' | 'VECTOR_LOOKUP_FAILED' | 'FILTER_LOOKUP_FAILED' | 'INVALID_SEARCH_PLAN') {
@@ -90,33 +91,27 @@ async function embeddingSearch(
   filtered = false
 ): Promise<SearchedPost[]> {
   if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
-  const emb = await generateEmbedding(text);
+  const signal = observationSignal();
+  const emb = await (signal ? generateEmbedding(text, signal) : generateEmbedding(text));
   if (!emb) throw new PostSearchError('EMBEDDING_FAILED');
   return matchEmbedding(emb, limit, args, filtered);
 }
 
 async function matchEmbedding(emb: number[], limit: number, args: SearchPostsArgs, filtered: boolean): Promise<SearchedPost[]> {
   if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
-  const { data, error } = await supabaseAdmin.rpc(filtered ? 'legacy_match_posts_filtered_at' : 'legacy_match_posts_at', {
-    as_of: chatDate(),
-    query_embedding: emb,
-    match_threshold: OPENAI_CONFIG.SIMILARITY_THRESHOLD,
-    match_count: limit,
-    include_expired: args.include_expired ?? false,
-    ...(filtered ? {
-      filter_activity_types: args.activity_types ?? null,
-      filter_campus: args.campus ?? null,
-      filter_deadline_from: args.deadline_from ?? null,
-      filter_deadline_to: args.deadline_to ?? null,
-    } : {}),
-  });
-  if (error) {
-    throw new PostSearchError('VECTOR_LOOKUP_FAILED');
-  }
-  return (data ?? []).map((r: { post: SearchedPost; similarity: number }) => ({
-    ...r.post,
-    similarity: r.similarity,
-  }));
+  return observeCall('vector_lookup', { filtered, limit, threshold: OPENAI_CONFIG.SIMILARITY_THRESHOLD }, async () => {
+    let query = supabaseAdmin!.rpc(filtered ? 'legacy_match_posts_filtered_at' : 'legacy_match_posts_at', {
+      as_of: chatDate(), query_embedding: emb, match_threshold: OPENAI_CONFIG.SIMILARITY_THRESHOLD,
+      match_count: limit, include_expired: args.include_expired ?? false,
+      ...(filtered ? { filter_activity_types: args.activity_types ?? null, filter_campus: args.campus ?? null,
+        filter_deadline_from: args.deadline_from ?? null, filter_deadline_to: args.deadline_to ?? null } : {}),
+    });
+    const signal = observationSignal();
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
+    if (error) throw new PostSearchError('VECTOR_LOOKUP_FAILED');
+    return (data ?? []).map((r: { post: SearchedPost; similarity: number }) => ({ ...r.post, similarity: r.similarity })) as SearchedPost[];
+  }, posts => ({ postIds: posts.map(p => p.id), resultCount: posts.length }));
 }
 
 // Equal-weight RRF (k=60). No below-cutoff padding; duplicate IDs use one card.
@@ -156,6 +151,13 @@ export async function searchPosts(
   const usesEmbedding = hasDiscovery || hasSemantic || !hasFilters;
   const { semantic_query, discovery_queries, ...filters } = args;
   const started = Date.now();
+  const details = { path, args: { ...args, include_expired: args.include_expired ?? false, limit },
+    fallbackQuery: path === 'fallback' ? fallbackQuery : undefined, asOf: todayKST(),
+    embeddingModel: usesEmbedding ? EMBEDDING_MODEL_ID : null,
+    dimensions: usesEmbedding ? EMBEDDING_DIMENSIONS : null,
+    threshold: usesEmbedding ? OPENAI_CONFIG.SIMILARITY_THRESHOLD : null };
+  const end = currentObservation()?.begin('search_posts', details);
+  currentObservation()?.setSearch(details);
   traceChat('search_start', {
     path, ...queryTrace(discovery_queries ? JSON.stringify(discovery_queries) : semantic_query ?? (hasFilters ? '' : fallbackQuery)),
     queryCount: discovery_queries?.length ?? (usesEmbedding ? 1 : 0),
@@ -166,6 +168,8 @@ export async function searchPosts(
   });
   try {
     const posts = await executeSearch(args, fallbackQuery, hasFilters, hasSemantic, limit);
+    end?.({ resultCount: posts.length, postIds: posts.map(p => p.id) });
+    currentObservation()?.setSearch({ ...details, resultCount: posts.length });
     traceChat('search_end', { outcome: posts.length ? 'success' : 'empty', path,
       resultCount: posts.length, postIds: posts.map(post => post.id),
       topSimilarity: posts.reduce<number | null>((max, post) => typeof post.similarity === 'number' && Number.isFinite(post.similarity)
@@ -174,6 +178,7 @@ export async function searchPosts(
   } catch (error) {
     traceChat('search_end', { outcome: 'error', path,
       errorCode: error instanceof PostSearchError ? error.code : 'SEARCH_FAILED', durationMs: Date.now() - started });
+    end?.({}, error instanceof PostSearchError ? error.code : 'SEARCH_FAILED');
     throw error;
   }
 }
@@ -182,7 +187,8 @@ async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFi
   if (!supabaseAdmin) throw new PostSearchError('DATABASE_UNAVAILABLE');
 
   if (args.discovery_queries?.length) {
-    const embeddings = await generateEmbeddingsBatch(args.discovery_queries);
+    const signal = observationSignal();
+    const embeddings = await (signal ? generateEmbeddingsBatch(args.discovery_queries, signal) : generateEmbeddingsBatch(args.discovery_queries));
     if (embeddings.length !== args.discovery_queries.length || embeddings.some(embedding => !embedding)) throw new PostSearchError('EMBEDDING_FAILED');
     const lists = await Promise.all(embeddings.map(embedding => matchEmbedding(embedding!, 20, args, hasFilters)));
     return mergeDiscoveryResults(lists, limit);
@@ -220,11 +226,13 @@ async function executeSearch(args: SearchPostsArgs, fallbackQuery: string, hasFi
     })
     .limit(20);
 
-  const { data, error } = await query;
-  if (error) {
-    throw new PostSearchError('FILTER_LOOKUP_FAILED');
-  }
-  return ((data as SearchedPost[]) ?? []).slice(0, limit);
+  return observeCall('metadata_lookup', { orderByDeadline, limit: 20 }, async () => {
+    const signal = observationSignal();
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
+    if (error) throw new PostSearchError('FILTER_LOOKUP_FAILED');
+    return ((data as SearchedPost[]) ?? []).slice(0, limit);
+  }, posts => ({ resultCount: posts.length, postIds: posts.map(p => p.id) }));
 }
 
 // OpenAI function calling tool definition

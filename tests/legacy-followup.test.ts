@@ -18,6 +18,9 @@ import { POST } from '@/lib/legacy/chat';
 import { followupEvidence, followupRequest, renderFollowup } from '@/lib/legacy/chat-followup';
 import { withUsageMeter } from '@/lib/usage-meter';
 import { withChatTrace } from '@/lib/legacy/chat-trace';
+import { ChatObservation, withObservation } from '@/lib/chat-observation';
+import type { ObservationWrite } from '@/lib/chat-observation-types';
+import { randomUUID } from 'node:crypto';
 import exchangeSource from './fixtures/legacy-exchange-source.json';
 import searchSources from './fixtures/legacy-search-sources.json';
 
@@ -343,4 +346,37 @@ it('preserves the signed card context across explicit acknowledgement', async ()
 it('retains observed usage even when a paid selector response fails validation', async () => {
   const rows = await withUsageMeter(async () => events(await POST(request(question, token()))));
   expect(rows.at(-1)).toMatchObject({ type: 'error', usageReport: { complete: true, calls: [{ inputTokens: 10, outputTokens: 5 }] } });
+});
+
+it('captures the same reloaded reference, evidence and rendered answer as the real handler', async () => {
+  const writes: ObservationWrite[] = [];
+  const id = randomUUID();
+  const o = new ChatObservation(id, randomUUID(), { sessionId: randomUUID(), consentVersion: 'chat-observation-v1' }, async r => { writes.push(r); });
+  mocks.create.mockResolvedValueOnce(completion('{"refs":["E1"]}'));
+  const rows = await withUsageMeter(() => withObservation(o, () => withChatTrace({ requestId: id, mode: 'agentic' }, async () => events(await POST(request(question, token()))))), false);
+  await o.flush();
+  const last = writes.at(-1)!;
+  expect(last.status).toBe('completed');
+  expect(last.payload.reference).toMatchObject({ previousCardIds: [772], selectedPostId: 772 });
+  expect(last.payload.answer).toBe(answer(rows));
+  expect(last.payload.evidence[0]).toMatchObject(rows[1].evidence[0]);
+  expect(last.payload.calls.map(c => c.name)).toEqual(['reference_lookup', 'evidence_selection']);
+  expect(last.payload.calls[1].output).toMatchObject({ selectedRefs: ['E1'] });
+  expect(last.payload.versions.planningPrompt).toMatch(/^[a-f0-9]{64}$/);
+  expect(last.payload.usage?.complete).toBe(true);
+});
+
+it('cancels an observed answer stream and ignores late provider writes without an unhandled rejection', async () => {
+  const writes: ObservationWrite[] = [], o = new ChatObservation(randomUUID(), randomUUID(), { sessionId: randomUUID(), consentVersion: 'chat-observation-v1' }, async r => { writes.push(r); });
+  mocks.config.AGENTIC_RAG_ENABLED = false; mocks.search.mockResolvedValue([post]);
+  let release!: () => void;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  mocks.create.mockResolvedValueOnce((async function* () { await pending; yield { choices: [{ delta: { content: 'late' } }] }; })());
+  const response = await withUsageMeter(() => withObservation(o, () => POST(request('관련 공지', undefined, false))), false);
+  const reader = response.body!.getReader();
+  await reader.read();
+  await reader.cancel(); release(); await new Promise(resolve => setTimeout(resolve, 0)); await o.flush();
+  expect(o.signal.aborted).toBe(true);
+  expect(writes.at(-1)?.status).toBe('cancelled');
+  expect(writes.at(-1)?.payload.answer).not.toContain('late');
 });

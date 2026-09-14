@@ -1,4 +1,5 @@
 {
+  "crons": [{ "path": "/api/internal/chat-observations/purge", "schedule": "0 0 * * *" }],
   "functions": {
     "src/app/api/crawl/route.ts": {
       "maxDuration": 60
